@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-REPO_URL="https://github.com/dark-eraser/garmin-weekly-zones.git"
+REPO_URL="https://github.com/dark-eraser/zonely.git"
 INSTALL_DIR="${GARMIN_ZONES_HOME:-$HOME/.garmin-weekly-zones}"
 LINK_DIR="${GARMIN_ZONES_LINK_DIR:-/usr/local/bin}"
 LINK_PATH="$LINK_DIR/garmin-zones"
