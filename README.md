@@ -2,6 +2,7 @@
 
 > A terminal-friendly weekly training tracker that pulls activities and heart-rate data from Garmin Connect, matches them to your configured sports plan, and shows progress toward weekly targets — including non-activity zone time.
 
+[![CI](https://github.com/dark-eraser/garmin-weekly-zones/actions/workflows/ci.yml/badge.svg)](https://github.com/dark-eraser/garmin-weekly-zones/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bun](https://img.shields.io/badge/runtime-bun-black)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/lang-typescript-3178c6)](https://www.typescriptlang.org/)
@@ -9,6 +10,13 @@
 ---
 
 ## What it looks like
+
+<p align="center">
+  <img src="docs/screenshot.svg" alt="garmin-zones terminal output" width="780">
+</p>
+
+<details>
+<summary>Plain-text version</summary>
 
 ```
   WEEKLY TRAINING  ·  Jun 15, 2026 – Jun 21, 2026
@@ -54,6 +62,8 @@
 
   total active:  4h 1m
 ```
+
+</details>
 
 The real terminal output is fully colored — green/yellow/red progress bars, cyan headers, gray meta, and zone-coded HR splits.
 
@@ -108,6 +118,7 @@ garmin-zones                        # current week (Mon–Sun)
 garmin-zones --week 2026-06-08      # the week containing this date
 garmin-zones --no-daily             # skip daily HR fetch (much faster)
 garmin-zones --help                 # show usage
+garmin-zones --version              # print version
 garmin-zones setup                  # run the interactive setup wizard
 garmin-zones setup --reset          # clear the config and reconfigure
 ```
@@ -227,6 +238,17 @@ Re-run `garmin-zones setup --reset` to recalculate them from your max HR, or edi
 | Setup wizard exits immediately | You're not running in an interactive terminal; run it directly, not via pipe |
 | Want a different week | `garmin-zones --week 2026-06-08` |
 
+### Exit codes
+
+`garmin-zones` returns standard exit codes for scripting:
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `1` | User error (bad flag, invalid `--week` date, unknown argument) |
+| `2` | Garmin Connect authentication failure |
+| `127` | Missing external dependency (`bun` or `garmin-connect` not on PATH) |
+
 ---
 
 ## Contributing
@@ -236,6 +258,8 @@ Issues and pull requests welcome.
 ```bash
 git clone https://github.com/dark-eraser/garmin-weekly-zones.git
 cd garmin-weekly-zones
+bun install
+bun test
 bun src/index.ts --help
 ```
 

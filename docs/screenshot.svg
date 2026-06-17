@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 720" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace" font-size="13">
+  <defs>
+    <style>
+      .bg     { fill: #0d1117; }
+      .chrome { fill: #161b22; }
+      .dot-r  { fill: #ff5f57; }
+      .dot-y  { fill: #febc2e; }
+      .dot-g  { fill: #28c840; }
+      .title  { fill: #8b949e; font-size: 11px; }
+      .fg     { fill: #c9d1d9; }
+      .gray   { fill: #6e7681; }
+      .bold   { fill: #f0f6fc; font-weight: 700; }
+      .cyan   { fill: #79c0ff; font-weight: 700; }
+      .green  { fill: #3fb950; }
+      .yellow { fill: #d29922; }
+      .red    { fill: #f85149; }
+      .bar-gn { fill: #3fb950; }
+      .bar-yl { fill: #d29922; }
+      .bar-rd { fill: #f85149; }
+      .bar-bg { fill: #30363d; }
+    </style>
+  </defs>
+
+  <!-- terminal frame -->
+  <rect class="bg" width="820" height="720" rx="10"/>
+  <rect class="chrome" width="820" height="32" rx="10"/>
+  <rect class="chrome" y="22" width="820" height="10"/>
+  <circle class="dot-r" cx="18" cy="16" r="6"/>
+  <circle class="dot-y" cx="38" cy="16" r="6"/>
+  <circle class="dot-g" cx="58" cy="16" r="6"/>
+  <text class="title" x="410" y="20" text-anchor="middle">garmin-zones — bash</text>
+
+  <!-- terminal content -->
+  <g transform="translate(20, 60)">
+    <!-- Header -->
+    <text y="0"><tspan class="cyan">WEEKLY TRAINING</tspan>  <tspan class="gray">·</tspan>  <tspan class="bold">Jun 15, 2026 – Jun 21, 2026</tspan></text>
+    <text class="gray" y="18">──────────────────────────────────────────────────────────────────────────</text>
+
+    <!-- Sports checklist -->
+    <text class="bold" y="48">SPORTS CHECKLIST</text>
+
+    <text y="80"><tspan class="green">✓</tspan>  <tspan class="bold">🏃  Zone 2 Cardio</tspan>  <tspan class="gray">60–75m Z2</tspan></text>
+    <g transform="translate(20, 92)">
+      <rect class="bar-gn" width="160" height="10" rx="2"/>
+    </g>
+    <text y="108">   <tspan class="bold">1h 5m</tspan> <tspan class="gray">Z2</tspan> / <tspan class="fg">1h</tspan> <tspan class="green">· done ✓</tspan></text>
+    <text y="126"><tspan class="gray">   MON</tspan>  <tspan class="fg">Morning Run</tspan>  <tspan class="gray">run</tspan>  <tspan class="bold">58m</tspan>  <tspan class="gray">9.4km  138bpm</tspan>  <tspan class="cyan">Z2:48m</tspan>  <tspan class="yellow">Z3:8m</tspan></text>
+    <text y="142"><tspan class="gray">   WED</tspan>  <tspan class="fg">Easy Cycle</tspan>  <tspan class="gray">cycle</tspan>  <tspan class="bold">41m</tspan>  <tspan class="gray">18.2km  131bpm</tspan>  <tspan class="cyan">Z2:17m</tspan></text>
+
+    <text y="172"><tspan class="yellow">◑</tspan>  <tspan class="bold">🧗  Bouldering</tspan>  <tspan class="gray">85–95m</tspan></text>
+    <g transform="translate(20, 184)">
+      <rect class="bar-bg" width="160" height="10" rx="2"/>
+      <rect class="bar-yl" width="94" height="10" rx="2"/>
+    </g>
+    <text y="200">   <tspan class="bold">50m</tspan> / <tspan class="fg">1h 25m</tspan>  <tspan class="gray">· 35m left</tspan></text>
+    <text y="216"><tspan class="gray">   TUE</tspan>  <tspan class="fg">Boulder Gym</tspan>  <tspan class="gray">boulder</tspan>  <tspan class="bold">50m</tspan></text>
+
+    <text y="246"><tspan class="gray">○</tspan>  <tspan class="bold">⚡  HIIT + Stability</tspan>  <tspan class="gray">55–65m</tspan></text>
+    <text class="gray" y="262">   not logged yet</text>
+
+    <text y="292"><tspan class="yellow">◑</tspan>  <tspan class="bold">🏐  Volleyball</tspan>  <tspan class="gray">85–95m</tspan></text>
+    <g transform="translate(20, 304)">
+      <rect class="bar-bg" width="160" height="10" rx="2"/>
+      <rect class="bar-rd" width="38" height="10" rx="2"/>
+    </g>
+    <text y="320">   <tspan class="bold">20m</tspan> / <tspan class="fg">1h 25m</tspan>  <tspan class="gray">· 1h 5m left</tspan></text>
+    <text y="336"><tspan class="gray">   SAT</tspan>  <tspan class="fg">Pickup Game</tspan>  <tspan class="gray">volleyball</tspan>  <tspan class="bold">20m</tspan>  <tspan class="gray">142bpm</tspan></text>
+
+    <text y="366"><tspan class="green">✓</tspan>  <tspan class="bold">🚴  Long Aerobic</tspan>  <tspan class="gray">75–90m</tspan></text>
+    <g transform="translate(20, 378)">
+      <rect class="bar-gn" width="160" height="10" rx="2"/>
+    </g>
+    <text y="394">   <tspan class="bold">1h 32m</tspan> / <tspan class="fg">1h 15m</tspan>  <tspan class="green">· done ✓</tspan></text>
+    <text y="410"><tspan class="gray">   SUN</tspan>  <tspan class="fg">Trail Loop</tspan>  <tspan class="gray">trail</tspan>  <tspan class="bold">1h 32m</tspan>  <tspan class="gray">21.7km  144bpm</tspan>  <tspan class="cyan">Z2:58m</tspan>  <tspan class="yellow">Z3:24m</tspan></text>
+
+    <text class="gray" y="446">──────────────────────────────────────────────────────────────────────────</text>
+
+    <!-- Zone totals -->
+    <text class="bold" y="476">ZONE TOTALS</text>
+    <text class="gray" y="494">activities: 5 · daily HR: 7 days · non-activity zones are ~estimates</text>
+
+    <text class="gray" y="524">                 bar                    activity   + daily     = total</text>
+
+    <text y="550"><tspan class="cyan">Z2  aerobic   </tspan></text>
+    <g transform="translate(140, 540)">
+      <rect class="bar-gn" width="160" height="10" rx="2"/>
+    </g>
+    <text y="550" x="310"><tspan class="cyan">2h 27m</tspan>  +<tspan class="gray">~1h 12m</tspan>  = <tspan class="bold">3h 39m</tspan> <tspan class="green">✓</tspan></text>
+
+    <text y="572"><tspan class="yellow">Z3  tempo     </tspan></text>
+    <g transform="translate(140, 562)">
+      <rect class="bar-bg" width="160" height="10" rx="2"/>
+      <rect class="bar-yl" width="54" height="10" rx="2"/>
+    </g>
+    <text y="572" x="310"><tspan class="yellow">36m</tspan>     +<tspan class="gray">~18m</tspan>    = <tspan class="bold">54m</tspan></text>
+
+    <text y="594"><tspan class="red">Z4  threshold </tspan></text>
+    <g transform="translate(140, 584)">
+      <rect class="bar-bg" width="160" height="10" rx="2"/>
+      <rect class="bar-rd" width="18" height="10" rx="2"/>
+    </g>
+    <text y="594" x="310"><tspan class="red">12m</tspan>                = <tspan class="bold">12m</tspan></text>
+
+    <text y="630"><tspan class="gray">total active:</tspan>  <tspan class="bold">4h 1m</tspan></text>
+  </g>
+</svg>

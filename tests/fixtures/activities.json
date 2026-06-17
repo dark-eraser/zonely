@@ -1,0 +1,194 @@
+[
+  {
+    "id": "easy-run-z2-by-effect",
+    "expectedSport": "zone2",
+    "activity": {
+      "activityName": "Easy morning run",
+      "startTimeLocal": "2026-06-15 07:30:00",
+      "activityType": { "typeKey": "running" },
+      "duration": 2700,
+      "distance": 6500,
+      "averageHR": 132,
+      "hrTimeInZone_1": 60,
+      "hrTimeInZone_2": 1800,
+      "hrTimeInZone_3": 120,
+      "trainingEffectLabel": "aerobic_base",
+      "aerobicTrainingEffectMessage": "aerobic_base"
+    }
+  },
+  {
+    "id": "easy-run-z2-by-time-in-zone",
+    "expectedSport": "zone2",
+    "activity": {
+      "activityName": "Recovery jog",
+      "startTimeLocal": "2026-06-16 18:00:00",
+      "activityType": { "typeKey": "running" },
+      "duration": 1800,
+      "distance": 4200,
+      "averageHR": 128,
+      "hrTimeInZone_1": 120,
+      "hrTimeInZone_2": 1500,
+      "hrTimeInZone_3": 60
+    }
+  },
+  {
+    "id": "long-ride-by-duration",
+    "expectedSport": "longAerobic",
+    "activity": {
+      "activityName": "Sunday long ride",
+      "startTimeLocal": "2026-06-21 09:00:00",
+      "activityType": { "typeKey": "cycling" },
+      "duration": 5400,
+      "distance": 42000,
+      "averageHR": 138,
+      "hrTimeInZone_2": 3000,
+      "hrTimeInZone_3": 1800,
+      "hrTimeInZone_4": 300
+    }
+  },
+  {
+    "id": "long-trail-run",
+    "expectedSport": "longAerobic",
+    "activity": {
+      "activityName": "Trail loop",
+      "startTimeLocal": "2026-06-20 10:00:00",
+      "activityType": { "typeKey": "trail_running" },
+      "duration": 5700,
+      "distance": 14000,
+      "averageHR": 142,
+      "hrTimeInZone_2": 3000,
+      "hrTimeInZone_3": 1800
+    }
+  },
+  {
+    "id": "boulder-by-type",
+    "expectedSport": "bouldering",
+    "activity": {
+      "activityName": "Climbing session",
+      "startTimeLocal": "2026-06-17 19:00:00",
+      "activityType": { "typeKey": "indoor_climbing" },
+      "duration": 3600,
+      "averageHR": 118
+    }
+  },
+  {
+    "id": "boulder-by-name",
+    "expectedSport": "bouldering",
+    "activity": {
+      "activityName": "Evening bouldering",
+      "startTimeLocal": "2026-06-18 20:00:00",
+      "activityType": { "typeKey": "strength_training" },
+      "duration": 3000,
+      "averageHR": 122
+    }
+  },
+  {
+    "id": "hiit-strength",
+    "expectedSport": "hiit",
+    "activity": {
+      "activityName": "Strength + intervals",
+      "startTimeLocal": "2026-06-16 12:00:00",
+      "activityType": { "typeKey": "strength_training" },
+      "duration": 2700,
+      "averageHR": 140,
+      "hrTimeInZone_3": 600,
+      "hrTimeInZone_4": 900
+    }
+  },
+  {
+    "id": "volleyball-match",
+    "expectedSport": "volleyball",
+    "activity": {
+      "activityName": "Pickup volleyball",
+      "startTimeLocal": "2026-06-19 18:30:00",
+      "activityType": { "typeKey": "volleyball" },
+      "duration": 5100,
+      "averageHR": 145
+    }
+  },
+  {
+    "id": "tennis-direct",
+    "expectedSport": "tennis",
+    "configKeysExtra": ["tennis"],
+    "activity": {
+      "activityName": "Tennis singles",
+      "startTimeLocal": "2026-06-17 17:00:00",
+      "activityType": { "typeKey": "tennis" },
+      "duration": 3600,
+      "averageHR": 148
+    }
+  },
+  {
+    "id": "tennis-fallback-highintensity",
+    "expectedSport": "highIntensity",
+    "activity": {
+      "activityName": "Tennis singles",
+      "startTimeLocal": "2026-06-17 17:00:00",
+      "activityType": { "typeKey": "tennis" },
+      "duration": 3600,
+      "averageHR": 148
+    }
+  },
+  {
+    "id": "swim-short-z2",
+    "expectedSport": "zone2",
+    "activity": {
+      "activityName": "Pool laps",
+      "startTimeLocal": "2026-06-18 07:00:00",
+      "activityType": { "typeKey": "swimming" },
+      "duration": 1800,
+      "averageHR": 130,
+      "hrTimeInZone_2": 1200
+    }
+  },
+  {
+    "id": "swim-long-aerobic",
+    "expectedSport": "longAerobic",
+    "activity": {
+      "activityName": "Open water swim",
+      "startTimeLocal": "2026-06-21 08:00:00",
+      "activityType": { "typeKey": "open_water_swimming" },
+      "duration": 4200,
+      "distance": 3000,
+      "averageHR": 138
+    }
+  },
+  {
+    "id": "yoga-mobility",
+    "expectedSport": "mobility",
+    "activity": {
+      "activityName": "Yoga flow",
+      "startTimeLocal": "2026-06-20 08:00:00",
+      "activityType": { "typeKey": "yoga" },
+      "duration": 2400,
+      "averageHR": 88
+    }
+  },
+  {
+    "id": "high-intensity-vo2",
+    "expectedSport": "highIntensity",
+    "activity": {
+      "activityName": "VO2 intervals",
+      "startTimeLocal": "2026-06-16 19:00:00",
+      "activityType": { "typeKey": "running" },
+      "duration": 3000,
+      "distance": 7500,
+      "averageHR": 158,
+      "hrTimeInZone_2": 300,
+      "hrTimeInZone_3": 900,
+      "hrTimeInZone_4": 1500,
+      "trainingEffectLabel": "vo2"
+    }
+  },
+  {
+    "id": "unmatched-paddleboard",
+    "expectedSport": null,
+    "activity": {
+      "activityName": "SUP cruise",
+      "startTimeLocal": "2026-06-20 14:00:00",
+      "activityType": { "typeKey": "stand_up_paddleboarding" },
+      "duration": 2700,
+      "averageHR": 105
+    }
+  }
+]
