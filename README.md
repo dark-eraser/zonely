@@ -115,13 +115,41 @@ garmin-zones setup
 
 ```
 garmin-zones                        # current week (Mon–Sun)
+garmin-zones --today                # only today's activities
+garmin-zones --last 4               # compact summary of the last 4 weeks
 garmin-zones --week 2026-06-08      # the week containing this date
 garmin-zones --no-daily             # skip daily HR fetch (much faster)
+garmin-zones --json                 # emit machine-readable JSON instead of the colored UI
+garmin-zones --no-cache             # bypass cache reads (still writes)
+garmin-zones --refresh              # clear the cache before running
 garmin-zones --help                 # show usage
 garmin-zones --version              # print version
 garmin-zones setup                  # run the interactive setup wizard
 garmin-zones setup --reset          # clear the config and reconfigure
 ```
+
+### Caching
+
+Garmin API calls are slow, so responses are cached on disk under `~/.garmin-zones/cache/`:
+
+| What | TTL |
+|---|---|
+| Past-day data (activities + daily HR for any day before today) | Infinite — past days don't change |
+| Today's data | 1 hour |
+
+The first run of the week fetches everything; subsequent runs are sub-second. `--no-cache` bypasses cache reads (useful for one-off comparisons). `--refresh` wipes the cache entirely before running.
+
+### JSON mode
+
+`--json` emits a single structured object to stdout and routes loading messages to stderr. Useful for piping to `jq`, dashboards, or cron-job alerts.
+
+```bash
+garmin-zones --json | jq '.sports[] | select(.done) | .name'
+garmin-zones --last 4 --json | jq '.weeks[].totalActiveMins'
+garmin-zones --today --json
+```
+
+The payload shape is documented inline; the top-level keys are `week`, `sports`, `unmatched`, `zoneTotalsMins`, and `totalActiveMins` for single-week mode; `weeks: [...]` for `--last N`; and `date`, `activities`, `totalActiveMins` for `--today`.
 
 ### First-run
 

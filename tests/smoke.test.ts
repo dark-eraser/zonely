@@ -99,4 +99,37 @@ describe("argument parsing", () => {
     expect(monday!.getMonth()).toBe(5); // June (0-indexed)
     expect(monday!.getDate()).toBe(15);
   });
+
+  test("parseArgs recognises --json", () => {
+    expect(parseArgs(["--json"]).json).toBe(true);
+  });
+
+  test("parseArgs recognises --today", () => {
+    expect(parseArgs(["--today"]).today).toBe(true);
+  });
+
+  test("parseArgs recognises --no-cache and --refresh", () => {
+    const a = parseArgs(["--no-cache", "--refresh"]);
+    expect(a.noCache).toBe(true);
+    expect(a.refresh).toBe(true);
+  });
+
+  test("parseArgs accepts --last 4", () => {
+    const a = parseArgs(["--last", "4"]);
+    expect(a.last).toBe(4);
+    expect(a.lastInvalid).toBeNull();
+  });
+
+  test("parseArgs accepts --last=8", () => {
+    expect(parseArgs(["--last=8"]).last).toBe(8);
+  });
+
+  test("parseArgs rejects --last 0 and --last 99 as invalid", () => {
+    expect(parseArgs(["--last", "0"]).lastInvalid).toBe("0");
+    expect(parseArgs(["--last", "99"]).lastInvalid).toBe("99");
+  });
+
+  test("parseArgs rejects non-numeric --last value", () => {
+    expect(parseArgs(["--last", "many"]).lastInvalid).toBe("many");
+  });
 });
