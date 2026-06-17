@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# garmin-zones — bash wrapper for the bun TypeScript script
+
+set -euo pipefail
+
+# ─── colors ──────────────────────────────────────────────────────────────────
+if [[ -t 1 ]]; then
+  R=$'\033[0m'; B=$'\033[1m'; GR=$'\033[90m'
+  GN=$'\033[32m'; YL=$'\033[33m'; RD=$'\033[31m'; CY=$'\033[36m'
+else
+  R=""; B=""; GR=""; GN=""; YL=""; RD=""; CY=""
+fi
+
+err()  { printf "%s\n" "${RD}${B}error:${R} $*" >&2; }
+warn() { printf "%s\n" "${YL}warn:${R} $*" >&2; }
+info() { printf "%s\n" "${GR}$*${R}"; }
+
+# ─── locate this script's home ───────────────────────────────────────────────
+# Resolve symlinks so the wrapper works when symlinked from /usr/local/bin.
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+BIN_DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+PROJECT_DIR="$(cd -P "$BIN_DIR/.." >/dev/null 2>&1 && pwd)"
+SCRIPT="$PROJECT_DIR/src/index.ts"
+
+# ─── help ────────────────────────────────────────────────────────────────────
+print_help() {
+  cat <<EOF
+
+  ${B}${CY}garmin-weekly-zones${R}  ${GR}· weekly training zone tracker${R}
+
+  ${B}USAGE${R}
+    garmin-zones [options]
+    garmin-zones setup [--reset]
+
+  ${B}OPTIONS${R}
+    ${CY}--week${R} ${GR}YYYY-MM-DD${R}   Show the week containing this date
+    ${CY}--no-daily${R}            Skip daily HR fetch (faster; activities only)
+    ${CY}--help, -h${R}            Show this help and exit
+
+  ${B}SUBCOMMANDS${R}
+    ${CY}setup${R}                 Run interactive setup wizard
+    ${CY}setup --reset${R}         Clear and re-run setup
+
+  ${B}PREREQUISITES${R}
+    ${GR}- bun (https://bun.sh)${R}
+    ${GR}- garmin-connect CLI (bun add -g garmin-connect)${R}
+    ${GR}- Garmin account: garmin-connect auth login${R}
+
+  ${B}CONFIG${R}
+    ${GR}~/.garmin-zones/config.json${R}
+
+EOF
+}
+
+# Show wrapper-level help only when --help is the first arg.
+# The script itself ALSO handles --help — the wrapper printing first gives
+# users a fast response even if bun has to cold-start.
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  print_help
+  # Continue execution so the TypeScript --help also runs (single source of truth).
+fi
+
+# ─── preflight: bun ──────────────────────────────────────────────────────────
+if ! command -v bun >/dev/null 2>&1; then
+  err "bun is not installed or not on PATH."
+  info "  install bun:    curl -fsSL https://bun.sh/install | bash"
+  info "  then restart your shell and try again."
+  exit 127
+fi
+
+# ─── preflight: garmin-connect CLI ───────────────────────────────────────────
+if ! command -v garmin-connect >/dev/null 2>&1; then
+  err "garmin-connect CLI is not installed."
+  info "  install with:   bun add -g garmin-connect"
+  info "  then login:     garmin-connect auth login"
+  exit 127
+fi
+
+# ─── preflight: script exists ────────────────────────────────────────────────
+if [[ ! -f "$SCRIPT" ]]; then
+  err "Cannot find src/index.ts at: $SCRIPT"
+  info "  expected project layout: <project>/bin/garmin-zones and <project>/src/index.ts"
+  exit 1
+fi
+
+# ─── exec ────────────────────────────────────────────────────────────────────
+exec bun "$SCRIPT" "$@"

@@ -1,0 +1,22 @@
+{
+  "name": "garmin-weekly-zones",
+  "version": "1.0.0",
+  "description": "Weekly training zone tracker for Garmin Connect",
+  "scripts": {
+    "start": "bun src/index.ts",
+    "dev": "bun --watch src/index.ts"
+  },
+  "bin": {
+    "garmin-zones": "./bin/garmin-zones"
+  },
+  "keywords": ["garmin", "training", "zones", "fitness", "cli"],
+  "license": "MIT",
+  "author": "dark-eraser",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dark-eraser/garmin-weekly-zones.git"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}
