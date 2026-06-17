@@ -69,9 +69,34 @@ interface Sport {
   metric: SportMetric;
 }
 
+/**
+ * BPM lower-bounds for each zone above Z1.
+ * A sample falls in Z1 if `bpm < z2`, Z2 if `z2 <= bpm < z3`, etc.
+ * Z5 has no upper bound.
+ */
+interface ZoneThresholds {
+  z2: number;
+  z3: number;
+  z4: number;
+  z5: number;
+}
+
 interface Config {
   version: number;
   sports: Sport[];
+  zones?: ZoneThresholds;
+}
+
+const DEFAULT_ZONES: ZoneThresholds = { z2: 125, z3: 146, z4: 162, z5: 176 };
+
+/** Compute zone boundaries from max HR using standard %-of-max bands. */
+function zonesFromMaxHr(maxHr: number): ZoneThresholds {
+  return {
+    z2: Math.round(maxHr * 0.64),
+    z3: Math.round(maxHr * 0.75),
+    z4: Math.round(maxHr * 0.83),
+    z5: Math.round(maxHr * 0.90),
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,13 +120,30 @@ function configExists(): boolean {
   return fs.existsSync(CONFIG_PATH);
 }
 
+function isValidZones(z: any): z is ZoneThresholds {
+  return (
+    z &&
+    typeof z.z2 === "number" &&
+    typeof z.z3 === "number" &&
+    typeof z.z4 === "number" &&
+    typeof z.z5 === "number" &&
+    z.z2 < z.z3 &&
+    z.z3 < z.z4 &&
+    z.z4 < z.z5
+  );
+}
+
 function loadConfig(): Config | null {
   if (!configExists()) return null;
   try {
     const raw = fs.readFileSync(CONFIG_PATH, "utf8");
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.sports) || parsed.sports.length === 0) return null;
-    return { version: parsed.version ?? 1, sports: parsed.sports };
+    return {
+      version: parsed.version ?? 1,
+      sports: parsed.sports,
+      zones: isValidZones(parsed.zones) ? parsed.zones : undefined,
+    };
   } catch {
     return null;
   }
@@ -134,13 +176,14 @@ async function runSetupWizard(reset = false): Promise<Config> {
   if (!process.stdin.isTTY) {
     console.log(red("  Setup requires an interactive terminal (stdin is not a TTY)."));
     console.log(gray("  Saving default plan instead."));
-    const fallback: Config = { version: 1, sports: DEFAULT_SPORTS };
+    const fallback: Config = { version: 1, sports: DEFAULT_SPORTS, zones: { ...DEFAULT_ZONES } };
     saveConfig(fallback);
     return fallback;
   }
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const chosen: Sport[] = [];
+  let zones: ZoneThresholds = { ...DEFAULT_ZONES };
 
   try {
     while (true) {
@@ -212,11 +255,56 @@ async function runSetupWizard(reset = false): Promise<Config> {
       console.log(green(`  Added ${sport.emoji} ${sport.name} (${sport.targetMin}–${sport.targetMax}m).`));
       console.log();
     }
+
+    // ─── zone thresholds ───────────────────────────────────────────────────
+    console.log(gray("  " + "─".repeat(62)));
+    console.log();
+    console.log(bold("  HEART-RATE ZONE THRESHOLDS"));
+    console.log(gray("  Used to bucket non-activity HR samples into zones."));
+    console.log(gray("  Activity zones still come straight from Garmin."));
+    console.log();
+    console.log("    1. Auto-calculate from max HR (recommended)");
+    console.log("    2. Enter the 4 boundary BPM values manually");
+    console.log(`    3. Use defaults ${gray(`(Z2 ${DEFAULT_ZONES.z2} / Z3 ${DEFAULT_ZONES.z3} / Z4 ${DEFAULT_ZONES.z4} / Z5 ${DEFAULT_ZONES.z5})`)}`);
+    console.log();
+
+    const modeAns = (await prompt(rl, `  ${cyan(">")} choice [1]: `)) || "1";
+
+    if (modeAns === "1") {
+      const maxAns = await prompt(rl, `  ${cyan(">")} your max HR (e.g. 195): `);
+      const maxHr = parseInt(maxAns, 10);
+      if (Number.isFinite(maxHr) && maxHr > 100 && maxHr < 230) {
+        zones = zonesFromMaxHr(maxHr);
+        console.log(green(`  Computed: Z2 ${zones.z2} / Z3 ${zones.z3} / Z4 ${zones.z4} / Z5 ${zones.z5}`));
+      } else {
+        console.log(yell(`  Invalid max HR — falling back to defaults.`));
+        zones = { ...DEFAULT_ZONES };
+      }
+    } else if (modeAns === "2") {
+      const ask = async (label: string, fallback: number): Promise<number> => {
+        const a = await prompt(rl, `  ${cyan(">")} ${label} lower bound [${fallback}]: `);
+        const v = parseInt(a, 10);
+        return Number.isFinite(v) && v > 0 ? v : fallback;
+      };
+      const z2 = await ask("Z2", DEFAULT_ZONES.z2);
+      const z3 = await ask("Z3", DEFAULT_ZONES.z3);
+      const z4 = await ask("Z4", DEFAULT_ZONES.z4);
+      const z5 = await ask("Z5", DEFAULT_ZONES.z5);
+      if (z2 < z3 && z3 < z4 && z4 < z5) {
+        zones = { z2, z3, z4, z5 };
+      } else {
+        console.log(yell(`  Values must be strictly increasing — falling back to defaults.`));
+        zones = { ...DEFAULT_ZONES };
+      }
+    } else {
+      zones = { ...DEFAULT_ZONES };
+    }
+    console.log();
   } finally {
     rl.close();
   }
 
-  const cfg: Config = { version: 1, sports: chosen };
+  const cfg: Config = { version: 1, sports: chosen, zones };
   saveConfig(cfg);
 
   console.log(gray("  " + "─".repeat(62)));
@@ -458,7 +546,11 @@ function matchSport(act: Activity, configKeys: Set<string>): string | null {
 // Non-activity HR zone estimation
 // ─────────────────────────────────────────────────────────────────────────────
 
-function nonActivityZones(hrValues: Array<[number, number]>, dayActivities: Activity[]): number[] {
+function nonActivityZones(
+  hrValues: Array<[number, number]>,
+  dayActivities: Activity[],
+  thresholds: ZoneThresholds,
+): number[] {
   const windows = dayActivities.map((a) => ({
     start: new Date(a.startTimeLocal).getTime(),
     end: new Date(a.startTimeLocal).getTime() + (a.duration + 180) * 1000,
@@ -466,10 +558,10 @@ function nonActivityZones(hrValues: Array<[number, number]>, dayActivities: Acti
   const zones = [0, 0, 0, 0, 0];
   for (const [ts, bpm] of hrValues) {
     if (windows.some((w) => ts >= w.start && ts <= w.end)) continue;
-    if (bpm < 125) zones[0]! += 2;
-    else if (bpm < 146) zones[1]! += 2;
-    else if (bpm < 162) zones[2]! += 2;
-    else if (bpm < 176) zones[3]! += 2;
+    if (bpm < thresholds.z2) zones[0]! += 2;
+    else if (bpm < thresholds.z3) zones[1]! += 2;
+    else if (bpm < thresholds.z4) zones[2]! += 2;
+    else if (bpm < thresholds.z5) zones[3]! += 2;
     else zones[4]! += 2;
   }
   return zones;
@@ -539,6 +631,7 @@ function renderZoneTotals(
   totalActivities: number,
   daysOfData: number,
   showDaily: boolean,
+  z2TargetMins: number | undefined,
 ): void {
   console.log(bold("  ZONE TOTALS"));
   const dailyNote = showDaily ? `· daily HR: ${daysOfData} days · non-activity zones are ~estimates` : "· daily HR skipped";
@@ -557,7 +650,7 @@ function renderZoneTotals(
     if (total === 0) continue;
     const name = ZONE_NAMES[i]!.padEnd(14);
     const colorOn = ZONE_COLORS[i]!;
-    const target = i === 1 ? 60 : undefined;
+    const target = i === 1 ? z2TargetMins : undefined;
     const b_ = target
       ? bar(total, target, 18)
       : `${colorOn}${"█".repeat(Math.min(Math.round(total / 6), 18)).padEnd(18, "░")}${R}`;
@@ -667,13 +760,14 @@ async function main() {
   }
 
   // Non-activity zones (optional)
+  const thresholds: ZoneThresholds = config.zones ?? DEFAULT_ZONES;
   const nonActZones = [0, 0, 0, 0, 0];
   if (!args.noDaily) {
     process.stdout.write(gray(`  loading daily HR (${passedDates.length} days)…`));
     for (const dateStr of passedDates) {
       const hr = garmin<{ heartRateValues?: Array<[number, number]> }>(`health heart-rate --date ${dateStr}`);
       if (!hr?.heartRateValues) continue;
-      const zones = nonActivityZones(hr.heartRateValues, actsByDate[dateStr] ?? []);
+      const zones = nonActivityZones(hr.heartRateValues, actsByDate[dateStr] ?? [], thresholds);
       for (let i = 0; i < 5; i++) nonActZones[i]! += zones[i]!;
     }
     process.stdout.write("\r" + " ".repeat(40) + "\r");
@@ -714,7 +808,9 @@ async function main() {
 
   console.log(SEP);
   console.log();
-  renderZoneTotals(actZones, nonActZones, inWindow.length, passedDates.length, !args.noDaily);
+  const z2Sport = config.sports.find((s) => s.key === "zone2");
+  const z2Target = z2Sport && z2Sport.metric === "zone2" ? z2Sport.targetMin : undefined;
+  renderZoneTotals(actZones, nonActZones, inWindow.length, passedDates.length, !args.noDaily, z2Target);
 
   const totalActive = Math.round(inWindow.reduce((s, a) => s + a.duration / 60, 0));
   console.log();

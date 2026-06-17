@@ -141,7 +141,8 @@ It's a simple JSON file you can edit by hand, or regenerate via `garmin-zones se
     { "key": "highIntensity", "emoji": "🔥", "name": "High-Intensity",  "description": "90–120 min flexible",     "targetMin": 90, "targetMax": 120, "metric": "duration" },
     { "key": "longAerobic",   "emoji": "🚴", "name": "Long Aerobic",    "description": "75–90 min ride or trail", "targetMin": 75, "targetMax": 90,  "metric": "duration" },
     { "key": "mobility",      "emoji": "🧘", "name": "Mobility Only",   "description": "30–45 min stretching",    "targetMin": 30, "targetMax": 45,  "metric": "duration" }
-  ]
+  ],
+  "zones": { "z2": 125, "z3": 146, "z4": 162, "z5": 176 }
 }
 ```
 
@@ -155,8 +156,25 @@ It's a simple JSON file you can edit by hand, or regenerate via `garmin-zones se
 | `description` | Short helper text. |
 | `targetMin` / `targetMax` | Weekly target band in minutes. Bar reaches full when you hit `targetMin`. |
 | `metric` | `zone2` counts only Zone-2 minutes in matching activities. `duration` counts total activity time. |
+| `zones` | BPM lower-bounds for Z2–Z5. A sample falls in Z1 if `bpm < z2`, Z2 if `z2 ≤ bpm < z3`, etc. Z5 has no upper bound. |
 
-> Tip: you can also tweak `src/index.ts` to customize zone thresholds or matching heuristics — see *How it works* below.
+> The **weekly Z2 target** in the *Zone Totals* section is read straight from the `zone2` sport entry's `targetMin`. Change one place, both views update.
+
+### Configuring zone thresholds
+
+The setup wizard offers three ways to set your BPM zone boundaries:
+
+1. **Auto-calculate from max HR** *(recommended)* — enter your max heart rate and the wizard applies standard %-of-max bands:
+   - Z2 ≈ 64% of max
+   - Z3 ≈ 75% of max
+   - Z4 ≈ 83% of max
+   - Z5 ≈ 90% of max
+2. **Manual** — type the four boundary BPM values yourself.
+3. **Defaults** — `{ z2: 125, z3: 146, z4: 162, z5: 176 }` (sensible for a max HR around 195).
+
+You can also edit the `zones` block in `~/.garmin-zones/config.json` directly. Values must be strictly increasing; invalid input falls back to defaults.
+
+These thresholds are applied **only to non-activity HR samples** — activity zones still come straight from Garmin's `hrTimeInZone_*` fields, which use the zones configured on your watch. The "~estimates" disclaimer in the output stays because raw-sample bucketing is still an approximation no matter how well-tuned the boundaries are.
 
 ---
 
@@ -185,7 +203,7 @@ It's a simple JSON file you can edit by hand, or regenerate via `garmin-zones se
 
 ## Zone thresholds
 
-Heart-rate zones are computed against fixed BPM bands. These are reasonable defaults for an athlete with a max HR around 195 and a resting HR around 50; tune them in `src/index.ts` (`nonActivityZones`) if your physiology differs.
+Heart-rate zones for non-activity samples are computed against the BPM bands in your `~/.garmin-zones/config.json` `zones` block. The defaults — reasonable for an athlete with a max HR around 195 — are:
 
 | Zone | Range (bpm) | What it represents |
 |---|---|---|
@@ -195,7 +213,7 @@ Heart-rate zones are computed against fixed BPM bands. These are reasonable defa
 | **Z4** | `162–175`    | Threshold |
 | **Z5** | `≥ 176`      | VO2 max / anaerobic |
 
-These thresholds are applied only to **non-activity HR samples** (background heart-rate when you're not in a recorded workout). Activity zones come straight from Garmin's `hrTimeInZone_*` fields, which use the zones configured on your watch.
+Re-run `garmin-zones setup --reset` to recalculate them from your max HR, or edit the `zones` block in the config file directly. Activity zones come straight from Garmin's `hrTimeInZone_*` fields, which use the zones configured on your watch — they're unaffected by these thresholds.
 
 ---
 
