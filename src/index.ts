@@ -118,8 +118,87 @@ function zonesFromMaxHr(maxHr: number): ZoneThresholds {
 // Config / setup
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CONFIG_DIR = path.join(os.homedir(), ".garmin-zones");
-const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
+/**
+ * Resolve config/cache paths at *call time* rather than module load.
+ * Tests set GARMIN_ZONES_HOME before importing; this keeps them isolated
+ * from the developer's real ~/.garmin-zones.
+ */
+function gzHome(): string {
+  return process.env.GARMIN_ZONES_HOME || path.join(os.homedir(), ".garmin-zones");
+}
+function gzConfigPath(): string {
+  return path.join(gzHome(), "config.json");
+}
+function gzCacheDir(): string {
+  return path.join(gzHome(), "cache");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cache helpers
+//
+// Cache files store *raw* Garmin payloads keyed by their request shape:
+//   activities/<after>__<limit>.json    — activities list response
+//   daily-hr/<YYYY-MM-DD>.json          — heart-rate sample stream
+//
+// Past-day data is immutable; "today" data has a 1h TTL.
+// Each cache file embeds a `fetched_at` ISO timestamp so we can age it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TODAY_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+interface CacheEntry<T> {
+  fetched_at: string;
+  payload: T;
+}
+
+export function cacheKey(kind: "activities" | "daily-hr", id: string): string {
+  return path.join(gzCacheDir(), kind, `${id}.json`);
+}
+
+function ensureCacheDir(kind: "activities" | "daily-hr") {
+  const dir = path.join(gzCacheDir(), kind);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+export function clearCache() {
+  if (fs.existsSync(gzCacheDir())) fs.rmSync(gzCacheDir(), { recursive: true, force: true });
+}
+
+/**
+ * Return `true` if a cache file is fresh enough to use.
+ * Past dates: always fresh.
+ * Today: fresh if younger than TODAY_TTL_MS.
+ */
+export function isCacheFresh(filePath: string, isToday: boolean): boolean {
+  if (!fs.existsSync(filePath)) return false;
+  if (!isToday) return true;
+  try {
+    const raw = fs.readFileSync(filePath, "utf8");
+    const entry = JSON.parse(raw) as CacheEntry<unknown>;
+    if (!entry.fetched_at) return false;
+    const age = Date.now() - new Date(entry.fetched_at).getTime();
+    return age < TODAY_TTL_MS;
+  } catch {
+    return false;
+  }
+}
+
+function readCache<T>(filePath: string): T | null {
+  try {
+    const raw = fs.readFileSync(filePath, "utf8");
+    const entry = JSON.parse(raw) as CacheEntry<T>;
+    return entry.payload ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache<T>(kind: "activities" | "daily-hr", id: string, payload: T) {
+  ensureCacheDir(kind);
+  const filePath = cacheKey(kind, id);
+  const entry: CacheEntry<T> = { fetched_at: new Date().toISOString(), payload };
+  fs.writeFileSync(filePath, JSON.stringify(entry), "utf8");
+}
 
 const DEFAULT_SPORTS: Sport[] = [
   { key: "zone2", emoji: "🏃", name: "Zone 2 Cardio", description: "easy run or ride", targetMin: 60, targetMax: 75, metric: "zone2" },
@@ -132,7 +211,7 @@ const DEFAULT_SPORTS: Sport[] = [
 ];
 
 function configExists(): boolean {
-  return fs.existsSync(CONFIG_PATH);
+  return fs.existsSync(gzConfigPath());
 }
 
 function isValidZones(z: any): z is ZoneThresholds {
@@ -151,7 +230,7 @@ function isValidZones(z: any): z is ZoneThresholds {
 function loadConfig(): Config | null {
   if (!configExists()) return null;
   try {
-    const raw = fs.readFileSync(CONFIG_PATH, "utf8");
+    const raw = fs.readFileSync(gzConfigPath(), "utf8");
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.sports) || parsed.sports.length === 0) return null;
     return {
@@ -165,12 +244,12 @@ function loadConfig(): Config | null {
 }
 
 function saveConfig(cfg: Config) {
-  if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2) + "\n", "utf8");
+  if (!fs.existsSync(gzHome())) fs.mkdirSync(gzHome(), { recursive: true });
+  fs.writeFileSync(gzConfigPath(), JSON.stringify(cfg, null, 2) + "\n", "utf8");
 }
 
 function resetConfig() {
-  if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
+  if (fs.existsSync(gzConfigPath())) fs.unlinkSync(gzConfigPath());
 }
 
 function prompt(rl: readline.Interface, question: string): Promise<string> {
@@ -323,7 +402,7 @@ async function runSetupWizard(reset = false): Promise<Config> {
   saveConfig(cfg);
 
   console.log(gray("  " + "─".repeat(62)));
-  console.log(green(`  Saved ${chosen.length} sport(s) to ${CONFIG_PATH}`));
+  console.log(green(`  Saved ${chosen.length} sport(s) to ${gzConfigPath()}`));
   console.log();
   return cfg;
 }
@@ -339,7 +418,14 @@ export interface CliArgs {
   week: string | null;
   setup: boolean;
   resetSetup: boolean;
+  json: boolean;
+  today: boolean;
+  last: number | null;
+  noCache: boolean;
+  refresh: boolean;
   unknown: string[];
+  /** Set when --last receives a malformed value; main() converts to USER_ERROR. */
+  lastInvalid: string | null;
 }
 
 export function parseArgs(argv: string[]): CliArgs {
@@ -350,16 +436,36 @@ export function parseArgs(argv: string[]): CliArgs {
     week: null,
     setup: false,
     resetSetup: false,
+    json: false,
+    today: false,
+    last: null,
+    noCache: false,
+    refresh: false,
     unknown: [],
+    lastInvalid: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "--help" || a === "-h") args.help = true;
     else if (a === "--version" || a === "-v") args.version = true;
     else if (a === "--no-daily") args.noDaily = true;
+    else if (a === "--json") args.json = true;
+    else if (a === "--today") args.today = true;
+    else if (a === "--no-cache") args.noCache = true;
+    else if (a === "--refresh") args.refresh = true;
     else if (a === "--week") args.week = argv[++i] ?? null;
     else if (a.startsWith("--week=")) args.week = a.slice("--week=".length);
-    else if (a === "setup") args.setup = true;
+    else if (a === "--last") {
+      const raw = argv[++i] ?? "";
+      const n = parseInt(raw, 10);
+      if (Number.isFinite(n) && n >= 1 && n <= 12) args.last = n;
+      else args.lastInvalid = raw || "(missing)";
+    } else if (a.startsWith("--last=")) {
+      const raw = a.slice("--last=".length);
+      const n = parseInt(raw, 10);
+      if (Number.isFinite(n) && n >= 1 && n <= 12) args.last = n;
+      else args.lastInvalid = raw || "(missing)";
+    } else if (a === "setup") args.setup = true;
     else if (a === "--reset" && args.setup) args.resetSetup = true;
     else args.unknown.push(a);
   }
@@ -395,7 +501,12 @@ function printHelp() {
   console.log();
   console.log(bold("  OPTIONS"));
   console.log(`    ${cyan("--week")} ${gray("YYYY-MM-DD")}   Show the week containing this date (defaults to current week)`);
+  console.log(`    ${cyan("--today")}               Show only today's activities (skips daily HR)`);
+  console.log(`    ${cyan("--last")} ${gray("N")}             Show a compact summary of the last N weeks (1–12)`);
   console.log(`    ${cyan("--no-daily")}            Skip daily HR fetch (faster; activities only)`);
+  console.log(`    ${cyan("--json")}                Emit a single JSON object instead of the colored UI`);
+  console.log(`    ${cyan("--no-cache")}            Bypass cache reads (still writes for next time)`);
+  console.log(`    ${cyan("--refresh")}             Clear the cache before running`);
   console.log(`    ${cyan("--help, -h")}            Show this help and exit`);
   console.log(`    ${cyan("--version, -v")}         Print version and exit`);
   console.log();
@@ -404,7 +515,7 @@ function printHelp() {
   console.log(`    ${cyan("setup --reset")}         Clear and re-run setup`);
   console.log();
   console.log(bold("  CONFIG"));
-  console.log(`    ${gray(CONFIG_PATH)}`);
+  console.log(`    ${gray(gzConfigPath())}`);
   console.log();
   console.log(bold("  PREREQUISITES"));
   console.log(`    ${gray("- bun (https://bun.sh)")}`);
@@ -469,13 +580,40 @@ function garminBinaryAvailable(): boolean {
   }
 }
 
-function garminAuthOk(): { ok: boolean; message?: string } {
+export type AuthFailureKind = "not_logged_in" | "token_expired" | "rate_limited" | "unknown";
+
+export interface AuthCheck {
+  ok: boolean;
+  kind?: AuthFailureKind;
+  message?: string;
+  remedy?: string;
+}
+
+/** Classify an auth error string so we can give a useful hint. */
+export function classifyAuthError(message: string): { kind: AuthFailureKind; remedy: string } {
+  const m = message.toLowerCase();
+  if (/expired|refresh.*token|token.*expired|reauth/.test(m)) {
+    return { kind: "token_expired", remedy: "garmin-connect auth refresh" };
+  }
+  if (/rate.?limit|too many requests|429/.test(m)) {
+    return { kind: "rate_limited", remedy: "wait a few minutes and try again" };
+  }
+  if (/not.*log(ged)?.*in|no.*credential|unauth(orized|enticated)|please.*log/.test(m)) {
+    return { kind: "not_logged_in", remedy: "garmin-connect auth login" };
+  }
+  return { kind: "unknown", remedy: "garmin-connect auth login" };
+}
+
+function garminAuthOk(): AuthCheck {
   try {
     const out = execSync("garmin-connect auth status", { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], timeout: 15_000 });
     if (/logged\s*in/i.test(out) || /authenticated/i.test(out) || /ok/i.test(out)) return { ok: true };
-    return { ok: false, message: out.trim() || "Auth status unclear" };
+    const classified = classifyAuthError(out);
+    return { ok: false, kind: classified.kind, remedy: classified.remedy, message: out.trim() || "Auth status unclear" };
   } catch (e: any) {
-    return { ok: false, message: (e?.stderr?.toString?.() || e?.message || "auth check failed").trim() };
+    const raw = (e?.stderr?.toString?.() || e?.message || "auth check failed").trim();
+    const classified = classifyAuthError(raw);
+    return { ok: false, kind: classified.kind, remedy: classified.remedy, message: raw };
   }
 }
 
@@ -490,6 +628,28 @@ function garmin<T = any>(cmd: string): T | null {
   } catch {
     return null;
   }
+}
+
+interface CacheOpts {
+  noCache: boolean;
+}
+
+/** Wrap garmin() with disk caching. */
+function garminCached<T = any>(
+  cmd: string,
+  kind: "activities" | "daily-hr",
+  id: string,
+  isToday: boolean,
+  opts: CacheOpts,
+): T | null {
+  const filePath = cacheKey(kind, id);
+  if (!opts.noCache && isCacheFresh(filePath, isToday)) {
+    const hit = readCache<T>(filePath);
+    if (hit !== null) return hit;
+  }
+  const fresh = garmin<T>(cmd);
+  if (fresh !== null) writeCache(kind, id, fresh);
+  return fresh;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -705,6 +865,384 @@ function renderZoneTotals(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Week gathering & rendering
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface WeekResult {
+  monday: Date;
+  sunday: Date;
+  passedDates: string[];
+  inWindow: Activity[];
+  sportMap: Record<string, Activity[]>;
+  unmatched: Activity[];
+  actZones: number[];      // minutes per zone, activity-only
+  nonActZones: number[];   // minutes per zone, non-activity estimate
+  showDaily: boolean;
+}
+
+interface GatherOpts {
+  noDaily: boolean;
+  noCache: boolean;
+  json: boolean;
+}
+
+/** Fetch + bucket a single Mon–Sun window. Side-effect free except for cache writes. */
+function gatherWeek(monday: Date, config: Config, opts: GatherOpts): WeekResult {
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const now = new Date();
+  const endOfRange = now < sunday ? now : sunday;
+  const passedDates: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    if (d <= endOfRange) passedDates.push(isoDate(d));
+  }
+
+  const todayStr = isoDate(now);
+  const loader = opts.json ? (s: string) => process.stderr.write(s) : (s: string) => process.stdout.write(s);
+
+  // Activities
+  loader(gray("  loading activities…"));
+  const actsId = `${isoDate(monday)}__40`;
+  const isTodayInWindow = passedDates.includes(todayStr);
+  const activities: Activity[] =
+    garminCached<Activity[]>(
+      `activities list --after ${isoDate(monday)} --limit 40`,
+      "activities",
+      actsId,
+      isTodayInWindow,
+      { noCache: opts.noCache },
+    ) ?? [];
+  const sundayEnd = new Date(sunday);
+  sundayEnd.setHours(23, 59, 59, 999);
+  const inWindow = activities.filter((a) => {
+    const t = new Date(a.startTimeLocal).getTime();
+    return t >= monday.getTime() && t <= sundayEnd.getTime();
+  });
+  loader("\r" + " ".repeat(30) + "\r");
+
+  const actsByDate: Record<string, Activity[]> = {};
+  for (const act of inWindow) {
+    const d = act.startTimeLocal.split(" ")[0]!;
+    (actsByDate[d] ??= []).push(act);
+  }
+
+  // Non-activity zones (optional)
+  const thresholds: ZoneThresholds = config.zones ?? DEFAULT_ZONES;
+  const nonActZones = [0, 0, 0, 0, 0];
+  if (!opts.noDaily) {
+    loader(gray(`  loading daily HR (${passedDates.length} days)…`));
+    for (const dateStr of passedDates) {
+      const isToday = dateStr === todayStr;
+      const hr = garminCached<{ heartRateValues?: Array<[number, number]> }>(
+        `health heart-rate --date ${dateStr}`,
+        "daily-hr",
+        dateStr,
+        isToday,
+        { noCache: opts.noCache },
+      );
+      if (!hr?.heartRateValues) continue;
+      const zones = nonActivityZones(hr.heartRateValues, actsByDate[dateStr] ?? [], thresholds);
+      for (let i = 0; i < 5; i++) nonActZones[i]! += zones[i]!;
+    }
+    loader("\r" + " ".repeat(40) + "\r");
+  }
+
+  // Bucket into sports
+  const configKeys = new Set(config.sports.map((s) => s.key));
+  const sportMap: Record<string, Activity[]> = {};
+  for (const s of config.sports) sportMap[s.key] = [];
+  const unmatched: Activity[] = [];
+  for (const act of inWindow) {
+    const key = matchSport(act, configKeys);
+    if (key && sportMap[key]) sportMap[key]!.push(act);
+    else unmatched.push(act);
+  }
+
+  // Activity zone totals
+  const actZones = [0, 0, 0, 0, 0];
+  for (const act of inWindow) {
+    actZones[0]! += (act.hrTimeInZone_1 ?? 0) / 60;
+    actZones[1]! += (act.hrTimeInZone_2 ?? 0) / 60;
+    actZones[2]! += (act.hrTimeInZone_3 ?? 0) / 60;
+    actZones[3]! += (act.hrTimeInZone_4 ?? 0) / 60;
+    actZones[4]! += (act.hrTimeInZone_5 ?? 0) / 60;
+  }
+
+  return {
+    monday,
+    sunday,
+    passedDates,
+    inWindow,
+    sportMap,
+    unmatched,
+    actZones,
+    nonActZones,
+    showDaily: !opts.noDaily,
+  };
+}
+
+/** Convert a WeekResult into the structured JSON payload. */
+function weekToJson(week: WeekResult, config: Config) {
+  const sports = config.sports.map((sport) => {
+    const acts = week.sportMap[sport.key] ?? [];
+    const totalZ2 = acts.reduce((s, a) => s + (a.hrTimeInZone_2 ?? 0) / 60, 0);
+    const totalDur = acts.reduce((s, a) => s + a.duration / 60, 0);
+    const metric = sport.metric === "zone2" ? totalZ2 : totalDur;
+    return {
+      key: sport.key,
+      name: sport.name,
+      emoji: sport.emoji,
+      targetMin: sport.targetMin,
+      targetMax: sport.targetMax,
+      metric: sport.metric,
+      progressMins: Math.round(metric),
+      done: metric >= sport.targetMin,
+      activities: acts.map((a) => ({
+        name: a.activityName,
+        type: a.activityType.typeKey,
+        startTimeLocal: a.startTimeLocal,
+        durationMins: Math.round(a.duration / 60),
+        distanceKm: a.distance ? +(a.distance / 1000).toFixed(2) : null,
+        averageHR: a.averageHR ?? null,
+        hrZoneMins: {
+          z1: Math.round((a.hrTimeInZone_1 ?? 0) / 60),
+          z2: Math.round((a.hrTimeInZone_2 ?? 0) / 60),
+          z3: Math.round((a.hrTimeInZone_3 ?? 0) / 60),
+          z4: Math.round((a.hrTimeInZone_4 ?? 0) / 60),
+          z5: Math.round((a.hrTimeInZone_5 ?? 0) / 60),
+        },
+      })),
+    };
+  });
+
+  return {
+    week: {
+      monday: isoDate(week.monday),
+      sunday: isoDate(week.sunday),
+      daysOfData: week.passedDates.length,
+    },
+    sports,
+    unmatched: week.unmatched.map((a) => ({
+      name: a.activityName,
+      type: a.activityType.typeKey,
+      startTimeLocal: a.startTimeLocal,
+      durationMins: Math.round(a.duration / 60),
+    })),
+    zoneTotalsMins: {
+      activity: {
+        z1: Math.round(week.actZones[0]!),
+        z2: Math.round(week.actZones[1]!),
+        z3: Math.round(week.actZones[2]!),
+        z4: Math.round(week.actZones[3]!),
+        z5: Math.round(week.actZones[4]!),
+      },
+      nonActivity: {
+        z1: Math.round(week.nonActZones[0]!),
+        z2: Math.round(week.nonActZones[1]!),
+        z3: Math.round(week.nonActZones[2]!),
+        z4: Math.round(week.nonActZones[3]!),
+        z5: Math.round(week.nonActZones[4]!),
+      },
+    },
+    totalActiveMins: Math.round(week.inWindow.reduce((s, a) => s + a.duration / 60, 0)),
+  };
+}
+
+function renderSingleWeek(week: WeekResult, config: Config): void {
+  const weekLabel = [week.monday, week.sunday]
+    .map((d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }))
+    .join(" – ");
+  const SEP = gray("  " + "─".repeat(62));
+
+  console.log();
+  console.log(`  ${bold(cyan("WEEKLY TRAINING"))}  ${gray("·")}  ${bold(weekLabel)}`);
+  console.log(SEP);
+  console.log();
+
+  renderSportsChecklist(config.sports, week.sportMap);
+
+  if (week.unmatched.length > 0) {
+    console.log(gray(`  unmatched (${week.unmatched.length}):`));
+    for (const a of week.unmatched) {
+      const dow = new Date(a.startTimeLocal).toLocaleDateString("en-US", { weekday: "short" }).toUpperCase();
+      console.log(
+        `     ${gray(dow)}  ${a.activityName}  ${gray(actLabel(a.activityType.typeKey))}  ${bold(fmtMins(a.duration / 60))}`,
+      );
+    }
+    console.log(
+      gray(`     ${yell("hint:")} to track these, add a sport with a matching key via `) +
+        bold("garmin-zones setup --reset"),
+    );
+    console.log();
+  }
+
+  console.log(SEP);
+  console.log();
+  const z2Sport = config.sports.find((s) => s.key === "zone2");
+  const z2Target = z2Sport && z2Sport.metric === "zone2" ? z2Sport.targetMin : undefined;
+  renderZoneTotals(week.actZones, week.nonActZones, week.inWindow.length, week.passedDates.length, week.showDaily, z2Target);
+
+  const totalActive = Math.round(week.inWindow.reduce((s, a) => s + a.duration / 60, 0));
+  console.log();
+  console.log(`  ${gray("total active:")}  ${bold(fmtMins(totalActive))}`);
+  console.log();
+}
+
+/** --today: a single-day breakdown. Skips daily HR (single-day focus). */
+function renderTodayView(config: Config, args: CliArgs): number {
+  const now = new Date();
+  const todayStr = isoDate(now);
+  const todayLabel = now.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" });
+
+  const loader = args.json ? (s: string) => process.stderr.write(s) : (s: string) => process.stdout.write(s);
+  loader(gray("  loading today's activities…"));
+  const acts =
+    garminCached<Activity[]>(
+      `activities list --after ${todayStr} --limit 20`,
+      "activities",
+      `today__${todayStr}`,
+      true,
+      { noCache: args.noCache },
+    ) ?? [];
+  loader("\r" + " ".repeat(40) + "\r");
+
+  const startOfDay = new Date(now);
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date(now);
+  endOfDay.setHours(23, 59, 59, 999);
+  const todays = acts.filter((a) => {
+    const t = new Date(a.startTimeLocal).getTime();
+    return t >= startOfDay.getTime() && t <= endOfDay.getTime();
+  });
+
+  const configKeys = new Set(config.sports.map((s) => s.key));
+
+  if (args.json) {
+    const payload = {
+      date: todayStr,
+      activities: todays.map((a) => ({
+        name: a.activityName,
+        type: a.activityType.typeKey,
+        startTimeLocal: a.startTimeLocal,
+        durationMins: Math.round(a.duration / 60),
+        distanceKm: a.distance ? +(a.distance / 1000).toFixed(2) : null,
+        averageHR: a.averageHR ?? null,
+        matchedSport: matchSport(a, configKeys),
+      })),
+      totalActiveMins: Math.round(todays.reduce((s, a) => s + a.duration / 60, 0)),
+    };
+    process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
+    return EXIT.OK;
+  }
+
+  console.log();
+  console.log(`  ${bold(cyan("TODAY"))}  ${gray("·")}  ${bold(todayLabel)}`);
+  console.log(gray("  " + "─".repeat(62)));
+  console.log();
+  if (todays.length === 0) {
+    console.log(gray("  no activities logged yet today."));
+    console.log();
+    return EXIT.OK;
+  }
+  for (const a of todays) {
+    const durMins = Math.round(a.duration / 60);
+    const z2m = Math.round((a.hrTimeInZone_2 ?? 0) / 60);
+    const z3m = Math.round((a.hrTimeInZone_3 ?? 0) / 60);
+    const z4m = Math.round((a.hrTimeInZone_4 ?? 0) / 60);
+    const distStr = a.distance ? `  ${gray((a.distance / 1000).toFixed(1) + "km")}` : "";
+    const hrStr = a.averageHR ? `  ${gray(a.averageHR + "bpm")}` : "";
+    const sport = matchSport(a, configKeys);
+    const sportStr = sport ? `  ${green("→ " + sport)}` : `  ${yell("→ unmatched")}`;
+    const zoneParts: string[] = [];
+    if (z2m > 0) zoneParts.push(cyan(`Z2:${z2m}m`));
+    if (z3m > 0) zoneParts.push(yell(`Z3:${z3m}m`));
+    if (z4m > 0) zoneParts.push(red(`Z4:${z4m}m`));
+    console.log(
+      `  ${a.activityName}  ${gray(actLabel(a.activityType.typeKey))}  ${bold(fmtMins(durMins))}${distStr}${hrStr}${zoneParts.length ? "  " + zoneParts.join("  ") : ""}${sportStr}`,
+    );
+  }
+  const total = Math.round(todays.reduce((s, a) => s + a.duration / 60, 0));
+  console.log();
+  console.log(`  ${gray("total active:")}  ${bold(fmtMins(total))}`);
+  console.log();
+  return EXIT.OK;
+}
+
+/** --last N: compact summary of last N weeks side-by-side. */
+function renderLastNView(config: Config, args: CliArgs, n: number): number {
+  const weeks: WeekResult[] = [];
+  const thisMonday = getWeekMonday();
+  for (let i = n - 1; i >= 0; i--) {
+    const mon = new Date(thisMonday);
+    mon.setDate(thisMonday.getDate() - i * 7);
+    if (!args.json) {
+      process.stdout.write(gray(`  fetching week of ${isoDate(mon)}…  `));
+    } else {
+      process.stderr.write(gray(`  fetching week of ${isoDate(mon)}…  `));
+    }
+    const w = gatherWeek(mon, config, { noDaily: true, noCache: args.noCache, json: args.json });
+    weeks.push(w);
+    if (!args.json) process.stdout.write("\r" + " ".repeat(50) + "\r");
+    else process.stderr.write("\r" + " ".repeat(50) + "\r");
+  }
+
+  if (args.json) {
+    const payload = {
+      weeks: weeks.map((w) => weekToJson(w, config)),
+    };
+    process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
+    return EXIT.OK;
+  }
+
+  // Render compact grid: rows are sports, columns are weeks, each cell is a status glyph.
+  console.log();
+  console.log(`  ${bold(cyan(`LAST ${n} WEEKS`))}  ${gray("·")}  ${bold(isoDate(weeks[0]!.monday))} → ${bold(isoDate(weeks[n - 1]!.sunday))}`);
+  console.log(gray("  " + "─".repeat(62)));
+  console.log();
+
+  // Column headers — abbreviated MM/DD of each Monday
+  const colHeaders = weeks.map((w) => {
+    const m = String(w.monday.getMonth() + 1).padStart(2, "0");
+    const d = String(w.monday.getDate()).padStart(2, "0");
+    return `${m}/${d}`;
+  });
+  const sportColWidth = Math.max(...config.sports.map((s) => s.name.length)) + 4;
+  console.log(
+    "  " + gray("sport".padEnd(sportColWidth)) + colHeaders.map((h) => gray(h.padStart(7))).join(""),
+  );
+
+  for (const sport of config.sports) {
+    const row: string[] = [];
+    for (const w of weeks) {
+      const acts = w.sportMap[sport.key] ?? [];
+      const totalZ2 = acts.reduce((s, a) => s + (a.hrTimeInZone_2 ?? 0) / 60, 0);
+      const totalDur = acts.reduce((s, a) => s + a.duration / 60, 0);
+      const metric = sport.metric === "zone2" ? totalZ2 : totalDur;
+      const m = Math.round(metric);
+      if (m === 0) row.push(gray("  ·   "));
+      else if (m >= sport.targetMin) row.push(green(`  ${m}m`.padStart(7)));
+      else row.push(yell(`  ${m}m`.padStart(7)));
+    }
+    console.log(
+      "  " + `${sport.emoji}  ${bold(sport.name)}`.padEnd(sportColWidth + 4) + row.join(""),
+    );
+  }
+
+  // Totals row
+  console.log();
+  const totals = weeks.map((w) => Math.round(w.inWindow.reduce((s, a) => s + a.duration / 60, 0)));
+  const totalsRow = totals.map((t) => gray(fmtMins(t).padStart(7))).join("");
+  console.log("  " + gray("total".padEnd(sportColWidth)) + totalsRow);
+  console.log();
+
+  console.log(gray("  legend: ") + green("met target") + gray("  ") + yell("under target") + gray("  ") + gray("·") + gray(" not logged"));
+  console.log();
+  return EXIT.OK;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -729,6 +1267,13 @@ async function main(): Promise<number> {
     return EXIT.USER_ERROR;
   }
 
+  if (args.lastInvalid !== null) {
+    console.log();
+    console.log(red(`  Invalid --last value: "${args.lastInvalid}". Expected an integer between 1 and 12.`));
+    console.log();
+    return EXIT.USER_ERROR;
+  }
+
   if (args.setup) {
     await runSetupWizard(args.resetSetup);
     return EXIT.OK;
@@ -744,133 +1289,67 @@ async function main(): Promise<number> {
 
   // Preflight: garmin-connect CLI
   if (!garminBinaryAvailable()) {
-    console.log();
-    console.log(red("  garmin-connect CLI not found in PATH."));
-    console.log(gray("  Install it with:  ") + bold("bun add -g garmin-connect"));
-    console.log();
+    const out = args.json ? console.error : console.log;
+    out();
+    out(red("  garmin-connect CLI not found in PATH."));
+    out(gray("  Install it with:  ") + bold("bun add -g garmin-connect"));
+    out();
     return EXIT.MISSING_DEPENDENCY;
   }
 
-  // Preflight: auth
+  // Preflight: auth (with classified hint)
   const auth = garminAuthOk();
   if (!auth.ok) {
-    console.log();
-    console.log(red("  Garmin Connect authentication is not active."));
-    if (auth.message) console.log(gray(`  ${auth.message}`));
-    console.log(gray("  Login with:  ") + bold("garmin-connect auth login"));
-    console.log();
+    const out = args.json ? console.error : console.log;
+    const kindLabel: Record<AuthFailureKind, string> = {
+      not_logged_in: "You are not logged in to Garmin Connect.",
+      token_expired: "Your Garmin Connect session has expired.",
+      rate_limited: "Garmin Connect rate-limited the request.",
+      unknown: "Garmin Connect authentication is not active.",
+    };
+    out();
+    out(red("  " + kindLabel[auth.kind ?? "unknown"]));
+    if (auth.message) out(gray(`  ${auth.message}`));
+    out(gray("  Fix: ") + bold(auth.remedy ?? "garmin-connect auth login"));
+    out();
     return EXIT.AUTH_FAILURE;
   }
 
-  // Week selection
+  // --refresh: nuke the cache up front
+  if (args.refresh) clearCache();
+
+  // ─── --today ────────────────────────────────────────────────────────────
+  if (args.today) {
+    return renderTodayView(config, args);
+  }
+
+  // ─── --last N ───────────────────────────────────────────────────────────
+  if (args.last !== null) {
+    return renderLastNView(config, args, args.last);
+  }
+
+  // ─── single week ────────────────────────────────────────────────────────
   let monday: Date;
   if (args.week) {
     const parsed = parseWeekFlag(args.week);
     if (!parsed) {
-      console.log(red(`  Invalid --week date: "${args.week}". Expected YYYY-MM-DD.`));
+      const out = args.json ? console.error : console.log;
+      out(red(`  Invalid --week date: "${args.week}". Expected YYYY-MM-DD.`));
       return EXIT.USER_ERROR;
     }
     monday = parsed;
   } else {
     monday = getWeekMonday();
   }
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
 
-  const today = new Date();
-  const endOfRange = today < sunday ? today : sunday;
-  const passedDates: string[] = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    if (d <= endOfRange) passedDates.push(isoDate(d));
+  const week = gatherWeek(monday, config, args);
+
+  if (args.json) {
+    process.stdout.write(JSON.stringify(weekToJson(week, config), null, 2) + "\n");
+    return EXIT.OK;
   }
 
-  const weekLabel = [monday, sunday]
-    .map((d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }))
-    .join(" – ");
-  const SEP = gray("  " + "─".repeat(62));
-
-  console.log();
-  console.log(`  ${bold(cyan("WEEKLY TRAINING"))}  ${gray("·")}  ${bold(weekLabel)}`);
-  console.log(SEP);
-  console.log();
-
-  // Activities
-  process.stdout.write(gray("  loading activities…"));
-  const activities: Activity[] = garmin<Activity[]>(`activities list --after ${isoDate(monday)} --limit 40`) ?? [];
-  // Filter to within the requested week
-  const sundayEnd = new Date(sunday);
-  sundayEnd.setHours(23, 59, 59, 999);
-  const inWindow = activities.filter((a) => {
-    const t = new Date(a.startTimeLocal).getTime();
-    return t >= monday.getTime() && t <= sundayEnd.getTime();
-  });
-  process.stdout.write("\r" + " ".repeat(30) + "\r");
-
-  const actsByDate: Record<string, Activity[]> = {};
-  for (const act of inWindow) {
-    const d = act.startTimeLocal.split(" ")[0]!;
-    (actsByDate[d] ??= []).push(act);
-  }
-
-  // Non-activity zones (optional)
-  const thresholds: ZoneThresholds = config.zones ?? DEFAULT_ZONES;
-  const nonActZones = [0, 0, 0, 0, 0];
-  if (!args.noDaily) {
-    process.stdout.write(gray(`  loading daily HR (${passedDates.length} days)…`));
-    for (const dateStr of passedDates) {
-      const hr = garmin<{ heartRateValues?: Array<[number, number]> }>(`health heart-rate --date ${dateStr}`);
-      if (!hr?.heartRateValues) continue;
-      const zones = nonActivityZones(hr.heartRateValues, actsByDate[dateStr] ?? [], thresholds);
-      for (let i = 0; i < 5; i++) nonActZones[i]! += zones[i]!;
-    }
-    process.stdout.write("\r" + " ".repeat(40) + "\r");
-  }
-
-  const configKeys = new Set(config.sports.map((s) => s.key));
-  const sportMap: Record<string, Activity[]> = {};
-  for (const s of config.sports) sportMap[s.key] = [];
-  const unmatched: Activity[] = [];
-  for (const act of inWindow) {
-    const key = matchSport(act, configKeys);
-    if (key && sportMap[key]) sportMap[key]!.push(act);
-    else unmatched.push(act);
-  }
-
-  // Activity zone totals
-  const actZones = [0, 0, 0, 0, 0];
-  for (const act of inWindow) {
-    actZones[0]! += (act.hrTimeInZone_1 ?? 0) / 60;
-    actZones[1]! += (act.hrTimeInZone_2 ?? 0) / 60;
-    actZones[2]! += (act.hrTimeInZone_3 ?? 0) / 60;
-    actZones[3]! += (act.hrTimeInZone_4 ?? 0) / 60;
-    actZones[4]! += (act.hrTimeInZone_5 ?? 0) / 60;
-  }
-
-  renderSportsChecklist(config.sports, sportMap);
-
-  if (unmatched.length > 0) {
-    console.log(gray(`  unmatched (${unmatched.length}):`));
-    for (const a of unmatched) {
-      const dow = new Date(a.startTimeLocal).toLocaleDateString("en-US", { weekday: "short" }).toUpperCase();
-      console.log(
-        `     ${gray(dow)}  ${a.activityName}  ${gray(actLabel(a.activityType.typeKey))}  ${bold(fmtMins(a.duration / 60))}`,
-      );
-    }
-    console.log();
-  }
-
-  console.log(SEP);
-  console.log();
-  const z2Sport = config.sports.find((s) => s.key === "zone2");
-  const z2Target = z2Sport && z2Sport.metric === "zone2" ? z2Sport.targetMin : undefined;
-  renderZoneTotals(actZones, nonActZones, inWindow.length, passedDates.length, !args.noDaily, z2Target);
-
-  const totalActive = Math.round(inWindow.reduce((s, a) => s + a.duration / 60, 0));
-  console.log();
-  console.log(`  ${gray("total active:")}  ${bold(fmtMins(totalActive))}`);
-  console.log();
+  renderSingleWeek(week, config);
   return EXIT.OK;
 }
 

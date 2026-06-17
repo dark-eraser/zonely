@@ -39,7 +39,12 @@ print_help() {
 
   ${B}OPTIONS${R}
     ${CY}--week${R} ${GR}YYYY-MM-DD${R}   Show the week containing this date
+    ${CY}--today${R}               Show only today's activities
+    ${CY}--last${R} ${GR}N${R}             Compact summary of the last N weeks (1–12)
     ${CY}--no-daily${R}            Skip daily HR fetch (faster; activities only)
+    ${CY}--json${R}                Emit JSON instead of the colored UI
+    ${CY}--no-cache${R}            Bypass cache reads (still writes)
+    ${CY}--refresh${R}             Clear cache before running
     ${CY}--help, -h${R}            Show this help and exit
     ${CY}--version, -v${R}         Print version and exit
 
