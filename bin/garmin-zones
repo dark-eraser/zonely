@@ -41,6 +41,7 @@ print_help() {
     ${CY}--week${R} ${GR}YYYY-MM-DD${R}   Show the week containing this date
     ${CY}--no-daily${R}            Skip daily HR fetch (faster; activities only)
     ${CY}--help, -h${R}            Show this help and exit
+    ${CY}--version, -v${R}         Print version and exit
 
   ${B}SUBCOMMANDS${R}
     ${CY}setup${R}                 Run interactive setup wizard

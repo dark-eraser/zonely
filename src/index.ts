@@ -10,7 +10,22 @@
  *   garmin-zones setup                 Run interactive setup wizard
  *   garmin-zones setup --reset         Reset and re-run setup
  *   garmin-zones --help                Show usage
+ *   garmin-zones --version             Show version
+ *
+ * Exit codes:
+ *   0   success
+ *   1   user error (bad args, invalid input)
+ *   2   auth failure
+ *   127 missing external dependency (garmin-connect / bun)
  */
+
+/** Semantic exit codes. */
+export const EXIT = {
+  OK: 0,
+  USER_ERROR: 1,
+  AUTH_FAILURE: 2,
+  MISSING_DEPENDENCY: 127,
+} as const;
 
 import { execSync } from "child_process";
 import * as fs from "fs";
@@ -41,7 +56,7 @@ const cyan = (s: string) => `${CY}${s}${R}`;
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface Activity {
+export interface Activity {
   activityName: string;
   startTimeLocal: string;
   activityType: { typeKey: string };
@@ -317,31 +332,57 @@ async function runSetupWizard(reset = false): Promise<Config> {
 // CLI argument parsing
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface CliArgs {
+export interface CliArgs {
   help: boolean;
+  version: boolean;
   noDaily: boolean;
   week: string | null;
   setup: boolean;
   resetSetup: boolean;
+  unknown: string[];
 }
 
-function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = { help: false, noDaily: false, week: null, setup: false, resetSetup: false };
+export function parseArgs(argv: string[]): CliArgs {
+  const args: CliArgs = {
+    help: false,
+    version: false,
+    noDaily: false,
+    week: null,
+    setup: false,
+    resetSetup: false,
+    unknown: [],
+  };
   for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
+    const a = argv[i]!;
     if (a === "--help" || a === "-h") args.help = true;
+    else if (a === "--version" || a === "-v") args.version = true;
     else if (a === "--no-daily") args.noDaily = true;
-    else if (a === "--week") {
-      args.week = argv[++i] ?? null;
-    } else if (a === "setup") {
-      args.setup = true;
-    } else if (a === "--reset" && args.setup) {
-      args.resetSetup = true;
-    } else if (a.startsWith("--week=")) {
-      args.week = a.slice("--week=".length);
-    }
+    else if (a === "--week") args.week = argv[++i] ?? null;
+    else if (a.startsWith("--week=")) args.week = a.slice("--week=".length);
+    else if (a === "setup") args.setup = true;
+    else if (a === "--reset" && args.setup) args.resetSetup = true;
+    else args.unknown.push(a);
   }
   return args;
+}
+
+/** Read version from package.json — small enough to inline-parse rather than import as JSON. */
+export function readPackageVersion(): string {
+  try {
+    const candidates = [
+      path.join(__dirname, "..", "package.json"),
+      path.join(process.cwd(), "package.json"),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        const pkg = JSON.parse(fs.readFileSync(p, "utf8"));
+        if (typeof pkg.version === "string") return pkg.version;
+      }
+    }
+  } catch {
+    /* swallow */
+  }
+  return "0.0.0";
 }
 
 function printHelp() {
@@ -356,6 +397,7 @@ function printHelp() {
   console.log(`    ${cyan("--week")} ${gray("YYYY-MM-DD")}   Show the week containing this date (defaults to current week)`);
   console.log(`    ${cyan("--no-daily")}            Skip daily HR fetch (faster; activities only)`);
   console.log(`    ${cyan("--help, -h")}            Show this help and exit`);
+  console.log(`    ${cyan("--version, -v")}         Print version and exit`);
   console.log();
   console.log(bold("  SUBCOMMANDS"));
   console.log(`    ${cyan("setup")}                 Run interactive setup wizard`);
@@ -389,7 +431,7 @@ function isoDate(d: Date): string {
   return d.toISOString().split("T")[0]!;
 }
 
-function parseWeekFlag(input: string): Date | null {
+export function parseWeekFlag(input: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input)) return null;
   const [y, m, d] = input.split("-").map(Number) as [number, number, number];
   const date = new Date(y, m - 1, d);
@@ -482,7 +524,7 @@ function actLabel(typeKey: string): string {
  * the canonical sport key. If the matched key isn't in the user's config,
  * the activity falls through to "unmatched".
  */
-function matchSport(act: Activity, configKeys: Set<string>): string | null {
+export function matchSport(act: Activity, configKeys: Set<string>): string | null {
   const type = act.activityType.typeKey;
   const durMin = act.duration / 60;
   const z2 = (act.hrTimeInZone_2 ?? 0) / 60;
@@ -666,17 +708,30 @@ function renderZoneTotals(
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function main() {
+async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
 
   if (args.help) {
     printHelp();
-    return;
+    return EXIT.OK;
+  }
+
+  if (args.version) {
+    console.log(readPackageVersion());
+    return EXIT.OK;
+  }
+
+  if (args.unknown.length > 0) {
+    console.log();
+    console.log(red(`  Unknown argument(s): ${args.unknown.join(" ")}`));
+    console.log(gray(`  Run "garmin-zones --help" for usage.`));
+    console.log();
+    return EXIT.USER_ERROR;
   }
 
   if (args.setup) {
     await runSetupWizard(args.resetSetup);
-    return;
+    return EXIT.OK;
   }
 
   // First-run detection
@@ -693,7 +748,7 @@ async function main() {
     console.log(red("  garmin-connect CLI not found in PATH."));
     console.log(gray("  Install it with:  ") + bold("bun add -g garmin-connect"));
     console.log();
-    process.exit(1);
+    return EXIT.MISSING_DEPENDENCY;
   }
 
   // Preflight: auth
@@ -704,7 +759,7 @@ async function main() {
     if (auth.message) console.log(gray(`  ${auth.message}`));
     console.log(gray("  Login with:  ") + bold("garmin-connect auth login"));
     console.log();
-    process.exit(1);
+    return EXIT.AUTH_FAILURE;
   }
 
   // Week selection
@@ -713,7 +768,7 @@ async function main() {
     const parsed = parseWeekFlag(args.week);
     if (!parsed) {
       console.log(red(`  Invalid --week date: "${args.week}". Expected YYYY-MM-DD.`));
-      process.exit(1);
+      return EXIT.USER_ERROR;
     }
     monday = parsed;
   } else {
@@ -816,9 +871,20 @@ async function main() {
   console.log();
   console.log(`  ${gray("total active:")}  ${bold(fmtMins(totalActive))}`);
   console.log();
+  return EXIT.OK;
 }
 
-main().catch((err) => {
-  console.error(red("  Unexpected error:"), err?.message ?? err);
-  process.exit(1);
-});
+/**
+ * Only run main() when this file is executed directly, not when imported by tests.
+ * Bun sets `import.meta.main` to true for the entry point.
+ */
+if (import.meta.main) {
+  main()
+    .then((code) => {
+      process.exit(code ?? EXIT.OK);
+    })
+    .catch((err) => {
+      console.error(red("  Unexpected error:"), err?.message ?? err);
+      process.exit(EXIT.USER_ERROR);
+    });
+}

@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile || bun install
+
+      - name: Run tests
+        run: bun test
+
+      - name: Build (verify the script bundles cleanly)
+        run: bun build --target=bun src/index.ts --outdir dist
+
+      - name: Smoke-check CLI binaries
+        run: |
+          chmod +x bin/garmin-zones
+          bash -n bin/garmin-zones
+          bash -n install.sh
+          bun src/index.ts --help > /dev/null
+          bun src/index.ts --version
