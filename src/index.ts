@@ -105,13 +105,51 @@ interface Config {
 const DEFAULT_ZONES: ZoneThresholds = { z2: 125, z3: 146, z4: 162, z5: 176 };
 
 /** Compute zone boundaries from max HR using standard %-of-max bands. */
-function zonesFromMaxHr(maxHr: number): ZoneThresholds {
+export function zonesFromMaxHr(maxHr: number): ZoneThresholds {
   return {
     z2: Math.round(maxHr * 0.64),
     z3: Math.round(maxHr * 0.75),
     z4: Math.round(maxHr * 0.83),
     z5: Math.round(maxHr * 0.90),
   };
+}
+
+/**
+ * Compute zone boundaries from lactate threshold HR (LTHR) using the
+ * Joe Friel / TrainingPeaks standard percentages:
+ *   Z1 < 81% LTHR · Z2 81-89% · Z3 90-93% · Z4 94-99% · Z5 ≥ 100%
+ * LTHR is the gold-standard zone reference for trained athletes — more
+ * accurate than max-HR-based zones because it correlates with sustainable
+ * threshold pace rather than peak capacity.
+ */
+export function zonesFromLthr(lthr: number): ZoneThresholds {
+  return {
+    z2: Math.round(lthr * 0.81),
+    z3: Math.round(lthr * 0.90),
+    z4: Math.round(lthr * 0.94),
+    z5: Math.round(lthr * 1.0),
+  };
+}
+
+/**
+ * Attempt to pull the user's LTHR from `garmin-connect training lactate`.
+ * Returns null if the endpoint fails or the payload doesn't include an HR.
+ * This is best-effort — callers should fall back to max-HR-based zones.
+ */
+export function fetchLthrFromGarmin(): number | null {
+  try {
+    const out = execSync("garmin-connect training lactate", {
+      encoding: "utf8",
+      timeout: 15_000,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const parsed = JSON.parse(out);
+    const hr = parsed?.speed_and_heart_rate?.heartRate;
+    if (typeof hr === "number" && hr > 100 && hr < 220) return hr;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -357,14 +395,35 @@ async function runSetupWizard(reset = false): Promise<Config> {
     console.log(gray("  Used to bucket non-activity HR samples into zones."));
     console.log(gray("  Activity zones still come straight from Garmin."));
     console.log();
-    console.log("    1. Auto-calculate from max HR (recommended)");
-    console.log("    2. Enter the 4 boundary BPM values manually");
-    console.log(`    3. Use defaults ${gray(`(Z2 ${DEFAULT_ZONES.z2} / Z3 ${DEFAULT_ZONES.z3} / Z4 ${DEFAULT_ZONES.z4} / Z5 ${DEFAULT_ZONES.z5})`)}`);
+    console.log("    1. Pull lactate threshold HR from Garmin (most accurate)");
+    console.log("    2. Auto-calculate from max HR");
+    console.log("    3. Enter the 4 boundary BPM values manually");
+    console.log(`    4. Use defaults ${gray(`(Z2 ${DEFAULT_ZONES.z2} / Z3 ${DEFAULT_ZONES.z3} / Z4 ${DEFAULT_ZONES.z4} / Z5 ${DEFAULT_ZONES.z5})`)}`);
     console.log();
 
     const modeAns = (await prompt(rl, `  ${cyan(">")} choice [1]: `)) || "1";
 
     if (modeAns === "1") {
+      process.stdout.write(gray("  fetching lactate threshold from Garmin… "));
+      const lthr = fetchLthrFromGarmin();
+      process.stdout.write("\r" + " ".repeat(50) + "\r");
+      if (lthr !== null) {
+        zones = zonesFromLthr(lthr);
+        console.log(green(`  Got LTHR ${lthr} bpm — computed: Z2 ${zones.z2} / Z3 ${zones.z3} / Z4 ${zones.z4} / Z5 ${zones.z5}`));
+      } else {
+        console.log(yell("  Couldn't fetch LTHR from Garmin (auth issue or no lactate data on file)."));
+        console.log(gray("  Falling back to max-HR auto-calc."));
+        const maxAns = await prompt(rl, `  ${cyan(">")} your max HR (e.g. 195): `);
+        const maxHr = parseInt(maxAns, 10);
+        if (Number.isFinite(maxHr) && maxHr > 100 && maxHr < 230) {
+          zones = zonesFromMaxHr(maxHr);
+          console.log(green(`  Computed: Z2 ${zones.z2} / Z3 ${zones.z3} / Z4 ${zones.z4} / Z5 ${zones.z5}`));
+        } else {
+          console.log(yell(`  Invalid max HR — falling back to defaults.`));
+          zones = { ...DEFAULT_ZONES };
+        }
+      }
+    } else if (modeAns === "2") {
       const maxAns = await prompt(rl, `  ${cyan(">")} your max HR (e.g. 195): `);
       const maxHr = parseInt(maxAns, 10);
       if (Number.isFinite(maxHr) && maxHr > 100 && maxHr < 230) {
@@ -374,7 +433,7 @@ async function runSetupWizard(reset = false): Promise<Config> {
         console.log(yell(`  Invalid max HR — falling back to defaults.`));
         zones = { ...DEFAULT_ZONES };
       }
-    } else if (modeAns === "2") {
+    } else if (modeAns === "3") {
       const ask = async (label: string, fallback: number): Promise<number> => {
         const a = await prompt(rl, `  ${cyan(">")} ${label} lower bound [${fallback}]: `);
         const v = parseInt(a, 10);
@@ -501,6 +560,7 @@ function printHelp() {
   console.log();
   console.log(bold("  OPTIONS"));
   console.log(`    ${cyan("--week")} ${gray("YYYY-MM-DD")}   Show the week containing this date (defaults to current week)`);
+  console.log(`    ${cyan("--week")} ${gray("last|prev")}    Shortcut for the previous week (also: this, next)`);
   console.log(`    ${cyan("--today")}               Show only today's activities (skips daily HR)`);
   console.log(`    ${cyan("--last")} ${gray("N")}             Show a compact summary of the last N weeks (1–12)`);
   console.log(`    ${cyan("--no-daily")}            Skip daily HR fetch (faster; activities only)`);
@@ -542,7 +602,36 @@ function isoDate(d: Date): string {
   return d.toISOString().split("T")[0]!;
 }
 
+/**
+ * Resolve a --week value into the Monday of the target week.
+ * Accepts:
+ *   - YYYY-MM-DD                       — any date; snaps to that week's Monday
+ *   - "this" / "current" / "now"       — current week's Monday
+ *   - "last" / "prev" / "previous"     — one week back
+ *   - "next"                            — one week forward (for planning ahead)
+ * Returns null for anything else.
+ */
 export function parseWeekFlag(input: string): Date | null {
+  const trimmed = input.trim().toLowerCase();
+  if (!trimmed) return null;
+
+  // String aliases (case-insensitive)
+  const thisMonday = getWeekMonday();
+  if (trimmed === "this" || trimmed === "current" || trimmed === "now") {
+    return thisMonday;
+  }
+  if (trimmed === "last" || trimmed === "prev" || trimmed === "previous") {
+    const d = new Date(thisMonday);
+    d.setDate(thisMonday.getDate() - 7);
+    return d;
+  }
+  if (trimmed === "next") {
+    const d = new Date(thisMonday);
+    d.setDate(thisMonday.getDate() + 7);
+    return d;
+  }
+
+  // Strict YYYY-MM-DD
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input)) return null;
   const [y, m, d] = input.split("-").map(Number) as [number, number, number];
   const date = new Date(y, m - 1, d);
@@ -902,13 +991,16 @@ function gatherWeek(monday: Date, config: Config, opts: GatherOpts): WeekResult 
   const todayStr = isoDate(now);
   const loader = opts.json ? (s: string) => process.stderr.write(s) : (s: string) => process.stdout.write(s);
 
-  // Activities
+  // Activities — limit 100 to cover high-volume athletes in a single week
+  // (a doubles-tennis player can easily log 20+ short sessions). 40 was
+  // enough for the original use case but truncated for power users.
   loader(gray("  loading activities…"));
-  const actsId = `${isoDate(monday)}__40`;
+  const ACTS_LIMIT = 100;
+  const actsId = `${isoDate(monday)}__${ACTS_LIMIT}`;
   const isTodayInWindow = passedDates.includes(todayStr);
   const activities: Activity[] =
     garminCached<Activity[]>(
-      `activities list --after ${isoDate(monday)} --limit 40`,
+      `activities list --after ${isoDate(monday)} --limit ${ACTS_LIMIT}`,
       "activities",
       actsId,
       isTodayInWindow,
@@ -1100,7 +1192,7 @@ function renderTodayView(config: Config, args: CliArgs): number {
   loader(gray("  loading today's activities…"));
   const acts =
     garminCached<Activity[]>(
-      `activities list --after ${todayStr} --limit 20`,
+      `activities list --after ${todayStr} --limit 50`,
       "activities",
       `today__${todayStr}`,
       true,

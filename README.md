@@ -118,6 +118,9 @@ garmin-zones                        # current week (Mon–Sun)
 garmin-zones --today                # only today's activities
 garmin-zones --last 4               # compact summary of the last 4 weeks
 garmin-zones --week 2026-06-08      # the week containing this date
+garmin-zones --week last            # previous week (also: prev, previous)
+garmin-zones --week this            # current week (also: current, now)
+garmin-zones --week next            # next week (for planning)
 garmin-zones --no-daily             # skip daily HR fetch (much faster)
 garmin-zones --json                 # emit machine-readable JSON instead of the colored UI
 garmin-zones --no-cache             # bypass cache reads (still writes)
@@ -201,15 +204,21 @@ It's a simple JSON file you can edit by hand, or regenerate via `garmin-zones se
 
 ### Configuring zone thresholds
 
-The setup wizard offers three ways to set your BPM zone boundaries:
+The setup wizard offers four ways to set your BPM zone boundaries, in order from most to least accurate for trained athletes:
 
-1. **Auto-calculate from max HR** *(recommended)* — enter your max heart rate and the wizard applies standard %-of-max bands:
+1. **Pull lactate threshold HR from Garmin** *(most accurate)* — calls `garmin-connect training lactate` and applies Joe Friel / TrainingPeaks bands:
+   - Z2 ≥ 81% of LTHR
+   - Z3 ≥ 90% of LTHR
+   - Z4 ≥ 94% of LTHR
+   - Z5 ≥ 100% of LTHR
+   - Requires that Garmin has detected your lactate threshold (any threshold-effort activity should do it).
+2. **Auto-calculate from max HR** — enter your max heart rate and the wizard applies standard %-of-max bands:
    - Z2 ≈ 64% of max
    - Z3 ≈ 75% of max
    - Z4 ≈ 83% of max
    - Z5 ≈ 90% of max
-2. **Manual** — type the four boundary BPM values yourself.
-3. **Defaults** — `{ z2: 125, z3: 146, z4: 162, z5: 176 }` (sensible for a max HR around 195).
+3. **Manual** — type the four boundary BPM values yourself.
+4. **Defaults** — `{ z2: 125, z3: 146, z4: 162, z5: 176 }` (sensible for a max HR around 195).
 
 You can also edit the `zones` block in `~/.garmin-zones/config.json` directly. Values must be strictly increasing; invalid input falls back to defaults.
 

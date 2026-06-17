@@ -100,6 +100,46 @@ describe("argument parsing", () => {
     expect(monday!.getDate()).toBe(15);
   });
 
+  test("parseWeekFlag accepts 'last' / 'prev' aliases", () => {
+    const last = parseWeekFlag("last");
+    const prev = parseWeekFlag("prev");
+    const previous = parseWeekFlag("previous");
+    expect(last).not.toBeNull();
+    expect(prev).not.toBeNull();
+    expect(previous).not.toBeNull();
+    // Same Monday across all three aliases
+    expect(last!.getTime()).toBe(prev!.getTime());
+    expect(prev!.getTime()).toBe(previous!.getTime());
+    expect(last!.getDay()).toBe(1);
+  });
+
+  test("parseWeekFlag accepts 'this' / 'current' / 'now' aliases", () => {
+    const thisM = parseWeekFlag("this");
+    const current = parseWeekFlag("current");
+    const now = parseWeekFlag("now");
+    expect(thisM).not.toBeNull();
+    expect(current).not.toBeNull();
+    expect(now).not.toBeNull();
+    expect(thisM!.getTime()).toBe(current!.getTime());
+    expect(current!.getTime()).toBe(now!.getTime());
+    expect(thisM!.getDay()).toBe(1);
+  });
+
+  test("parseWeekFlag accepts 'next' alias", () => {
+    const last = parseWeekFlag("last");
+    const next = parseWeekFlag("next");
+    expect(next).not.toBeNull();
+    expect(next!.getDay()).toBe(1);
+    const diffDays = (next!.getTime() - last!.getTime()) / (1000 * 60 * 60 * 24);
+    expect(diffDays).toBe(14);
+  });
+
+  test("parseWeekFlag aliases are case-insensitive", () => {
+    expect(parseWeekFlag("LAST")).not.toBeNull();
+    expect(parseWeekFlag("Prev")).not.toBeNull();
+    expect(parseWeekFlag("This")).not.toBeNull();
+  });
+
   test("parseArgs recognises --json", () => {
     expect(parseArgs(["--json"]).json).toBe(true);
   });
