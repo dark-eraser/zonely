@@ -59,6 +59,8 @@
   Z2  aerobic    ████████████████████   2h 27m  +~1h 12m  = 3h 39m ✓
   Z3  tempo      ██████░░░░░░░░░░░░     36m     +~ 18m    = 54m
   Z4  threshold  ██░░░░░░░░░░░░░░░░     12m                = 12m
+  Z5  max        █░░░░░░░░░░░░░░░░░░     8m                =  8m
+  Z4+Z5  hard    ████░░░░░░░░░░░░░░░░                      = 20m / 45m
 
   total active:  4h 1m
 ```
@@ -115,6 +117,7 @@ garmin-zones setup
 
 ```
 garmin-zones                        # current week (Mon–Sun)
+garmin-zones --last-week            # previous week (shorthand for --week last)
 garmin-zones --today                # only today's activities
 garmin-zones --last 4               # compact summary of the last 4 weeks
 garmin-zones --week 2026-06-08      # the week containing this date
@@ -184,7 +187,8 @@ It's a simple JSON file you can edit by hand, or regenerate via `garmin-zones se
     { "key": "longAerobic",   "emoji": "🚴", "name": "Long Aerobic",    "description": "75–90 min ride or trail", "targetMin": 75, "targetMax": 90,  "metric": "duration" },
     { "key": "mobility",      "emoji": "🧘", "name": "Mobility Only",   "description": "30–45 min stretching",    "targetMin": 30, "targetMax": 45,  "metric": "duration" }
   ],
-  "zones": { "z2": 125, "z3": 146, "z4": 162, "z5": 176 }
+  "zones": { "z2": 125, "z3": 146, "z4": 162, "z5": 176 },
+  "weeklyZoneGoals": { "z2Mins": 150, "z45Mins": 45 }
 }
 ```
 
@@ -199,8 +203,7 @@ It's a simple JSON file you can edit by hand, or regenerate via `garmin-zones se
 | `targetMin` / `targetMax` | Weekly target band in minutes. Bar reaches full when you hit `targetMin`. |
 | `metric` | `zone2` counts only Zone-2 minutes in matching activities. `duration` counts total activity time. |
 | `zones` | BPM lower-bounds for Z2–Z5. A sample falls in Z1 if `bpm < z2`, Z2 if `z2 ≤ bpm < z3`, etc. Z5 has no upper bound. |
-
-> The **weekly Z2 target** in the *Zone Totals* section is read straight from the `zone2` sport entry's `targetMin`. Change one place, both views update.
+| `weeklyZoneGoals` | Weekly minute targets shown in the *Zone Totals* section. `z2Mins` controls the Z2 bar target; `z45Mins` controls the combined Z4+Z5 target. Defaults: 150 min Z2, 45 min Z4+Z5. |
 
 ### Configuring zone thresholds
 
@@ -245,7 +248,12 @@ These thresholds are applied **only to non-activity HR samples** — activity zo
   - ≥70 min → **longAerobic**
   - Garmin training-effect "aerobic base" / "recovery" → **zone2**
   - Garmin training-effect "anaerobic" / "vo2" or high Z3+Z4 → **highIntensity**
+  - Activity name contains `tempo` / `interval` / `threshold` / `fartlek` / `race` / `speed` → **highIntensity** (falls back to **zone2**)
+  - Activity name contains `easy` / `base` / `recovery` / `jog` / `endurance` → **zone2**
   - At least 10 min in Z2 → **zone2**
+  - Generic aerobic fallback → **zone2** → **highIntensity** → **longAerobic** (whichever is configured first)
+
+**City-prefix stripping:** activity names like `"Zurich - Tempo"` or `"Berlin - Easy Run"` have the geographic prefix stripped before keyword matching, so the sport name after the dash drives classification rather than the city name.
 
 ---
 

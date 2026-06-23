@@ -170,3 +170,56 @@ describe("matchSport — precedence", () => {
     }
   });
 });
+
+describe("matchSport — city-prefix stripping & name keywords", () => {
+  function build(overrides: Partial<Activity>): Activity {
+    return {
+      activityName: "Test",
+      startTimeLocal: "2026-06-15 08:00:00",
+      activityType: { typeKey: "running" },
+      duration: 1800,
+      ...overrides,
+    } as Activity;
+  }
+
+  test('"Zurich - Tempo" routes to highIntensity', () => {
+    const a = build({ activityName: "Zurich - Tempo", duration: 3000 });
+    expect(matchSport(a, new Set(["highIntensity", "zone2"]))).toBe("highIntensity");
+  });
+
+  test('"Zurich - Tempo" falls back to zone2 when highIntensity not configured', () => {
+    const a = build({ activityName: "Zurich - Tempo", duration: 3000 });
+    expect(matchSport(a, new Set(["zone2"]))).toBe("zone2");
+  });
+
+  test('"Zurich - Base" routes to zone2', () => {
+    const a = build({ activityName: "Zurich - Base", duration: 1860 });
+    expect(matchSport(a, new Set(["zone2", "highIntensity"]))).toBe("zone2");
+  });
+
+  test('"Berlin - Intervals" routes to highIntensity', () => {
+    const a = build({ activityName: "Berlin - Intervals", duration: 2400 });
+    expect(matchSport(a, new Set(["highIntensity", "zone2"]))).toBe("highIntensity");
+  });
+
+  test('"Zurich Running" (no dash) falls back to zone2 via generic fallback', () => {
+    const a = build({ activityName: "Zurich Running", duration: 1440 });
+    expect(matchSport(a, new Set(["zone2"]))).toBe("zone2");
+  });
+
+  test('"Zurich Cycling" (no dash) falls back to zone2 via generic fallback', () => {
+    const a = build({ activityType: { typeKey: "cycling" }, activityName: "Zurich Cycling", duration: 1800 });
+    expect(matchSport(a, new Set(["zone2"]))).toBe("zone2");
+  });
+
+  test("generic aerobic fallback still returns null when no aerobic sport configured", () => {
+    const a = build({ activityName: "Zurich Running", duration: 1440 });
+    expect(matchSport(a, new Set(["bouldering", "hiit"]))).toBeNull();
+  });
+
+  test("name keywords check against shortName so city name does not itself trigger", () => {
+    // "Tempo" is a real city in Italy — "Tempo - Easy Run" should not route to highIntensity
+    const a = build({ activityName: "Tempo - Easy Run", duration: 1800 });
+    expect(matchSport(a, new Set(["zone2", "highIntensity"]))).toBe("zone2");
+  });
+});

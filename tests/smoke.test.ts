@@ -67,6 +67,18 @@ describe("argument parsing", () => {
     expect(args.unknown).toEqual(["--bogus-flag", "--also-bad"]);
   });
 
+  test("parseArgs recognises --last-week flag", () => {
+    const args = parseArgs(["--last-week"]);
+    expect(args.week).toBe("last");
+    expect(args.unknown).toEqual([]);
+  });
+
+  test("parseArgs recognises -lw shorthand", () => {
+    const args = parseArgs(["-lw"]);
+    expect(args.week).toBe("last");
+    expect(args.unknown).toEqual([]);
+  });
+
   test("parseArgs recognises --week with separate value", () => {
     const args = parseArgs(["--week", "2026-06-08"]);
     expect(args.week).toBe("2026-06-08");

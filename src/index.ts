@@ -5,6 +5,7 @@
  *
  * Usage:
  *   garmin-zones                       Show current week
+ *   garmin-zones --last-week           Show last week (alias for --week last)
  *   garmin-zones --week 2026-06-08     Show specific week (Monday date)
  *   garmin-zones --no-daily            Skip daily HR fetch (faster)
  *   garmin-zones setup                 Run interactive setup wizard
@@ -100,9 +101,18 @@ interface Config {
   version: number;
   sports: Sport[];
   zones?: ZoneThresholds;
+  weeklyZoneGoals?: WeeklyZoneGoals;
 }
 
 const DEFAULT_ZONES: ZoneThresholds = { z2: 125, z3: 146, z4: 162, z5: 176 };
+
+/** Weekly heart-rate zone minute targets shown in the ZONE TOTALS section. */
+interface WeeklyZoneGoals {
+  z2Mins: number;
+  z45Mins: number;
+}
+
+const DEFAULT_WEEKLY_ZONE_GOALS: WeeklyZoneGoals = { z2Mins: 150, z45Mins: 45 };
 
 /** Compute zone boundaries from max HR using standard %-of-max bands. */
 export function zonesFromMaxHr(maxHr: number): ZoneThresholds {
@@ -252,6 +262,15 @@ function configExists(): boolean {
   return fs.existsSync(gzConfigPath());
 }
 
+function parsePositiveInt(raw: string, fallback: number): number {
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function isValidWeeklyZoneGoals(g: any): g is WeeklyZoneGoals {
+  return g && typeof g.z2Mins === "number" && g.z2Mins > 0 && typeof g.z45Mins === "number" && g.z45Mins > 0;
+}
+
 function isValidZones(z: any): z is ZoneThresholds {
   return (
     z &&
@@ -275,6 +294,7 @@ function loadConfig(): Config | null {
       version: parsed.version ?? 1,
       sports: parsed.sports,
       zones: isValidZones(parsed.zones) ? parsed.zones : undefined,
+      weeklyZoneGoals: isValidWeeklyZoneGoals(parsed.weeklyZoneGoals) ? parsed.weeklyZoneGoals : undefined,
     };
   } catch {
     return null;
@@ -453,11 +473,26 @@ async function runSetupWizard(reset = false): Promise<Config> {
       zones = { ...DEFAULT_ZONES };
     }
     console.log();
+
+    // ─── weekly zone goals ────────────────────────────────────────────────
+    console.log(gray("  " + "─".repeat(62)));
+    console.log();
+    console.log(bold("  WEEKLY ZONE GOALS"));
+    console.log(gray("  Minute targets shown in the ZONE TOTALS section each week."));
+    console.log();
+    const z2GoalAns = await prompt(rl, `  ${cyan(">")} Zone 2 weekly target minutes [${DEFAULT_WEEKLY_ZONE_GOALS.z2Mins}]: `);
+    const z45GoalAns = await prompt(rl, `  ${cyan(">")} Zone 4+5 combined weekly target minutes [${DEFAULT_WEEKLY_ZONE_GOALS.z45Mins}]: `);
+    const weeklyZoneGoals: WeeklyZoneGoals = {
+      z2Mins: parsePositiveInt(z2GoalAns, DEFAULT_WEEKLY_ZONE_GOALS.z2Mins),
+      z45Mins: parsePositiveInt(z45GoalAns, DEFAULT_WEEKLY_ZONE_GOALS.z45Mins),
+    };
+    console.log(green(`  Zone goals: Z2 ${weeklyZoneGoals.z2Mins}m · Z4+5 ${weeklyZoneGoals.z45Mins}m`));
+    console.log();
   } finally {
     rl.close();
   }
 
-  const cfg: Config = { version: 1, sports: chosen, zones };
+  const cfg: Config = { version: 1, sports: chosen, zones, weeklyZoneGoals };
   saveConfig(cfg);
 
   console.log(gray("  " + "─".repeat(62)));
@@ -510,6 +545,7 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (a === "--no-daily") args.noDaily = true;
     else if (a === "--json") args.json = true;
     else if (a === "--today") args.today = true;
+    else if (a === "--last-week" || a === "-lw") { if (!args.week) args.week = "last"; }
     else if (a === "--no-cache") args.noCache = true;
     else if (a === "--refresh") args.refresh = true;
     else if (a === "--week") args.week = argv[++i] ?? null;
@@ -559,6 +595,7 @@ function printHelp() {
   console.log(`    garmin-zones setup [--reset]`);
   console.log();
   console.log(bold("  OPTIONS"));
+  console.log(`    ${cyan("--last-week, -lw")}       Show last week's full training view (alias for --week last)`);
   console.log(`    ${cyan("--week")} ${gray("YYYY-MM-DD")}   Show the week containing this date (defaults to current week)`);
   console.log(`    ${cyan("--week")} ${gray("last|prev")}    Shortcut for the previous week (also: this, next)`);
   console.log(`    ${cyan("--today")}               Show only today's activities (skips daily HR)`);
@@ -782,6 +819,10 @@ export function matchSport(act: Activity, configKeys: Set<string>): string | nul
   const effect = (act.trainingEffectLabel ?? "").toLowerCase();
   const msg = (act.aerobicTrainingEffectMessage ?? "").toLowerCase();
   const name = act.activityName.toLowerCase();
+  // Strip leading "City - " style prefix so geographic names don't interfere.
+  // "Zurich - Tempo" → "tempo", "Berlin - Easy Run" → "easy run".
+  // Falls back to the full name when no " - " separator is present.
+  const shortName = name.replace(/^[^-]+ - /, "");
 
   const has = (key: string) => configKeys.has(key);
 
@@ -826,9 +867,33 @@ export function matchSport(act: Activity, configKeys: Set<string>): string | nul
   if (!isAerobic) return null;
 
   if (durMin >= 70 && has("longAerobic")) return "longAerobic";
+
+  // Garmin training-effect signals
   if ((effect.includes("aerobic_base") || effect.includes("recovery") || msg.includes("aerobic_base")) && has("zone2")) return "zone2";
   if ((effect.includes("anaerobic") || effect.includes("vo2") || z3 + z4 > z2 + 10) && has("highIntensity")) return "highIntensity";
+
+  // Activity-name keyword signals (use shortName so city prefixes don't interfere)
+  const isIntenseByName =
+    shortName.includes("tempo") || shortName.includes("interval") ||
+    shortName.includes("threshold") || shortName.includes("fartlek") ||
+    shortName.includes("race") || shortName.includes("speed");
+  const isEasyByName =
+    shortName.includes("easy") || shortName.includes("base") ||
+    shortName.includes("recovery") || shortName.includes("jog") ||
+    shortName.includes("endurance");
+
+  if (isIntenseByName && has("highIntensity")) return "highIntensity";
+  if (isIntenseByName && has("zone2")) return "zone2";
+  if (isEasyByName && has("zone2")) return "zone2";
+
+  // Zone-data fallback
   if (z2 >= 10 && has("zone2")) return "zone2";
+
+  // Generic aerobic fallback — covers unlabelled short runs/rides where no
+  // specific signal fired (e.g. "Zurich Running", "Zurich Cycling")
+  if (has("zone2")) return "zone2";
+  if (has("highIntensity")) return "highIntensity";
+  if (has("longAerobic")) return "longAerobic";
 
   return null;
 }
@@ -922,7 +987,7 @@ function renderZoneTotals(
   totalActivities: number,
   daysOfData: number,
   showDaily: boolean,
-  z2TargetMins: number | undefined,
+  goals: WeeklyZoneGoals,
 ): void {
   console.log(bold("  ZONE TOTALS"));
   const dailyNote = showDaily ? `· daily HR: ${daysOfData} days · non-activity zones are ~estimates` : "· daily HR skipped";
@@ -933,15 +998,17 @@ function renderZoneTotals(
   const ZONE_NAMES = ["Z1  rest", "Z2  aerobic", "Z3  tempo", "Z4  threshold", "Z5  max"];
   const ZONE_COLORS = [GR, CY, YL, RD, RD + B];
 
+  let z45Total = 0;
   for (let i = 0; i < 5; i++) {
     if (i === 0) continue;
     const actM = Math.round(actZones[i]!);
     const dayM = Math.round(nonActZones[i]!);
     const total = actM + dayM;
+    if (i >= 3) z45Total += total;
     if (total === 0) continue;
     const name = ZONE_NAMES[i]!.padEnd(14);
     const colorOn = ZONE_COLORS[i]!;
-    const target = i === 1 ? z2TargetMins : undefined;
+    const target = i === 1 ? goals.z2Mins : undefined;
     const b_ = target
       ? bar(total, target, 18)
       : `${colorOn}${"█".repeat(Math.min(Math.round(total / 6), 18)).padEnd(18, "░")}${R}`;
@@ -951,6 +1018,12 @@ function renderZoneTotals(
     const tgtStr = target ? (total >= target ? green(" ✓") : gray(` / ${fmtMins(target)}`)) : "";
     console.log(`  ${colorOn}${name}${R}  ${b_}  ${actStr}${dayStr}  = ${totStr}${tgtStr}`);
   }
+
+  // Combined Z4+Z5 row (z45Total accumulated above)
+  const z45Name = "Z4+Z5  hard".padEnd(14);
+  const z45Bar = bar(z45Total, goals.z45Mins, 18);
+  const z45Tgt = z45Total >= goals.z45Mins ? green(" ✓") : gray(` / ${fmtMins(goals.z45Mins)}`);
+  console.log(`  ${RD}${z45Name}${R}  ${z45Bar}  ${"".padStart(18)}  = ${bold(fmtMins(z45Total))}${z45Tgt}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1077,6 +1150,7 @@ function gatherWeek(monday: Date, config: Config, opts: GatherOpts): WeekResult 
 
 /** Convert a WeekResult into the structured JSON payload. */
 function weekToJson(week: WeekResult, config: Config) {
+  const goals = config.weeklyZoneGoals ?? DEFAULT_WEEKLY_ZONE_GOALS;
   const sports = config.sports.map((sport) => {
     const acts = week.sportMap[sport.key] ?? [];
     const totalZ2 = acts.reduce((s, a) => s + (a.hrTimeInZone_2 ?? 0) / 60, 0);
@@ -1139,6 +1213,7 @@ function weekToJson(week: WeekResult, config: Config) {
       },
     },
     totalActiveMins: Math.round(week.inWindow.reduce((s, a) => s + a.duration / 60, 0)),
+    weeklyGoals: goals ?? DEFAULT_WEEKLY_ZONE_GOALS,
   };
 }
 
@@ -1172,9 +1247,8 @@ function renderSingleWeek(week: WeekResult, config: Config): void {
 
   console.log(SEP);
   console.log();
-  const z2Sport = config.sports.find((s) => s.key === "zone2");
-  const z2Target = z2Sport && z2Sport.metric === "zone2" ? z2Sport.targetMin : undefined;
-  renderZoneTotals(week.actZones, week.nonActZones, week.inWindow.length, week.passedDates.length, week.showDaily, z2Target);
+  const goals = config.weeklyZoneGoals ?? DEFAULT_WEEKLY_ZONE_GOALS;
+  renderZoneTotals(week.actZones, week.nonActZones, week.inWindow.length, week.passedDates.length, week.showDaily, goals);
 
   const totalActive = Math.round(week.inWindow.reduce((s, a) => s + a.duration / 60, 0));
   console.log();
