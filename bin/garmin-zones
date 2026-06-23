@@ -39,6 +39,7 @@ print_help() {
 
   ${B}OPTIONS${R}
     ${CY}--week${R} ${GR}YYYY-MM-DD${R}   Show the week containing this date
+    ${CY}--week${R} ${GR}last|prev${R}    Shortcut for previous week (also: this, next)
     ${CY}--today${R}               Show only today's activities
     ${CY}--last${R} ${GR}N${R}             Compact summary of the last N weeks (1–12)
     ${CY}--no-daily${R}            Skip daily HR fetch (faster; activities only)

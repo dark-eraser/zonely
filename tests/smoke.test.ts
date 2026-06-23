@@ -67,6 +67,18 @@ describe("argument parsing", () => {
     expect(args.unknown).toEqual(["--bogus-flag", "--also-bad"]);
   });
 
+  test("parseArgs recognises --last-week flag", () => {
+    const args = parseArgs(["--last-week"]);
+    expect(args.week).toBe("last");
+    expect(args.unknown).toEqual([]);
+  });
+
+  test("parseArgs recognises -lw shorthand", () => {
+    const args = parseArgs(["-lw"]);
+    expect(args.week).toBe("last");
+    expect(args.unknown).toEqual([]);
+  });
+
   test("parseArgs recognises --week with separate value", () => {
     const args = parseArgs(["--week", "2026-06-08"]);
     expect(args.week).toBe("2026-06-08");
@@ -98,6 +110,46 @@ describe("argument parsing", () => {
     expect(monday!.getFullYear()).toBe(2026);
     expect(monday!.getMonth()).toBe(5); // June (0-indexed)
     expect(monday!.getDate()).toBe(15);
+  });
+
+  test("parseWeekFlag accepts 'last' / 'prev' aliases", () => {
+    const last = parseWeekFlag("last");
+    const prev = parseWeekFlag("prev");
+    const previous = parseWeekFlag("previous");
+    expect(last).not.toBeNull();
+    expect(prev).not.toBeNull();
+    expect(previous).not.toBeNull();
+    // Same Monday across all three aliases
+    expect(last!.getTime()).toBe(prev!.getTime());
+    expect(prev!.getTime()).toBe(previous!.getTime());
+    expect(last!.getDay()).toBe(1);
+  });
+
+  test("parseWeekFlag accepts 'this' / 'current' / 'now' aliases", () => {
+    const thisM = parseWeekFlag("this");
+    const current = parseWeekFlag("current");
+    const now = parseWeekFlag("now");
+    expect(thisM).not.toBeNull();
+    expect(current).not.toBeNull();
+    expect(now).not.toBeNull();
+    expect(thisM!.getTime()).toBe(current!.getTime());
+    expect(current!.getTime()).toBe(now!.getTime());
+    expect(thisM!.getDay()).toBe(1);
+  });
+
+  test("parseWeekFlag accepts 'next' alias", () => {
+    const last = parseWeekFlag("last");
+    const next = parseWeekFlag("next");
+    expect(next).not.toBeNull();
+    expect(next!.getDay()).toBe(1);
+    const diffDays = (next!.getTime() - last!.getTime()) / (1000 * 60 * 60 * 24);
+    expect(diffDays).toBe(14);
+  });
+
+  test("parseWeekFlag aliases are case-insensitive", () => {
+    expect(parseWeekFlag("LAST")).not.toBeNull();
+    expect(parseWeekFlag("Prev")).not.toBeNull();
+    expect(parseWeekFlag("This")).not.toBeNull();
   });
 
   test("parseArgs recognises --json", () => {
