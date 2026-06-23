@@ -336,6 +336,7 @@ async function runSetupWizard(reset = false): Promise<Config> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const chosen: Sport[] = [];
   let zones: ZoneThresholds = { ...DEFAULT_ZONES };
+  let weeklyZoneGoals: WeeklyZoneGoals = { ...DEFAULT_WEEKLY_ZONE_GOALS };
 
   try {
     while (true) {
@@ -482,7 +483,7 @@ async function runSetupWizard(reset = false): Promise<Config> {
     console.log();
     const z2GoalAns = await prompt(rl, `  ${cyan(">")} Zone 2 weekly target minutes [${DEFAULT_WEEKLY_ZONE_GOALS.z2Mins}]: `);
     const z45GoalAns = await prompt(rl, `  ${cyan(">")} Zone 4+5 combined weekly target minutes [${DEFAULT_WEEKLY_ZONE_GOALS.z45Mins}]: `);
-    const weeklyZoneGoals: WeeklyZoneGoals = {
+    weeklyZoneGoals = {
       z2Mins: parsePositiveInt(z2GoalAns, DEFAULT_WEEKLY_ZONE_GOALS.z2Mins),
       z45Mins: parsePositiveInt(z45GoalAns, DEFAULT_WEEKLY_ZONE_GOALS.z45Mins),
     };
