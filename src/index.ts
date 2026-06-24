@@ -994,10 +994,20 @@ function renderZoneTotals(
   const dailyNote = showDaily ? `· daily HR: ${daysOfData} days · non-activity zones are ~estimates` : "· daily HR skipped";
   console.log(gray(`  activities: ${totalActivities} ${dailyNote}`));
   console.log();
-  console.log(gray(`  ${"".padEnd(14)}  ${"bar".padEnd(20)}  ${"activity".padEnd(8)}  ${"+ daily".padEnd(8)}  = total`));
+  console.log(gray(`  ${"".padEnd(15)}  ${"activity".padStart(7)}  ${"+~daily".padStart(9)}  ${"= total".padStart(10)}`));
 
   const ZONE_NAMES = ["Z1  rest", "Z2  aerobic", "Z3  tempo", "Z4  threshold", "Z5  max"];
   const ZONE_COLORS = [GR, CY, YL, RD, RD + B];
+  const BAR_W = 22;
+
+  function zoneBar(total: number, target: number, color: string): string {
+    const pct = Math.min(total / target, 1);
+    const filled = Math.round(pct * BAR_W);
+    const barStr = `${color}${"▓".repeat(filled)}${R}${GR}${"░".repeat(BAR_W - filled)}${R}`;
+    const pctStr = `${color}${Math.round(pct * 100).toString().padStart(4)}%${R}`;
+    const tgtStr = gray(`of ${fmtMins(target)}`);
+    return `${barStr}  ${pctStr}  ${tgtStr}`;
+  }
 
   let z45Total = 0;
   for (let i = 0; i < 5; i++) {
@@ -1007,24 +1017,21 @@ function renderZoneTotals(
     const total = actM + dayM;
     if (i >= 3) z45Total += total;
     if (total === 0) continue;
-    const name = ZONE_NAMES[i]!.padEnd(14);
-    const colorOn = ZONE_COLORS[i]!;
-    const target = i === 1 ? goals.z2Mins : undefined;
-    const b_ = target
-      ? bar(total, target, 18)
-      : `${colorOn}${"█".repeat(Math.min(Math.round(total / 6), 18)).padEnd(18, "░")}${R}`;
-    const actStr = `${colorOn}${fmtMins(actM).padStart(5)}${R}`;
-    const dayStr = dayM > 0 ? `  +${gray("~" + fmtMins(dayM).padStart(4))}` : "        ";
-    const totStr = bold(fmtMins(total));
-    const tgtStr = target ? (total >= target ? green(" ✓") : gray(` / ${fmtMins(target)}`)) : "";
-    console.log(`  ${colorOn}${name}${R}  ${b_}  ${actStr}${dayStr}  = ${totStr}${tgtStr}`);
+    const color = ZONE_COLORS[i]!;
+    const label = `${color}${ZONE_NAMES[i]!.padEnd(15)}${R}`;
+    const actStr = `${color}${fmtMins(actM).padStart(7)}${R}`;
+    const dayStr = dayM > 0 ? gray(`+~${fmtMins(dayM)}`.padStart(9)) : " ".repeat(9);
+    const totStr = bold(`= ${fmtMins(total)}`.padStart(10));
+    const barSuffix = i === 1 ? `  ${zoneBar(total, goals.z2Mins, color)}` : "";
+    console.log(`  ${label}  ${actStr}  ${dayStr}  ${totStr}${barSuffix}`);
   }
 
-  // Combined Z4+Z5 row (z45Total accumulated above)
-  const z45Name = "Z4+Z5  hard".padEnd(14);
-  const z45Bar = bar(z45Total, goals.z45Mins, 18);
-  const z45Tgt = z45Total >= goals.z45Mins ? green(" ✓") : gray(` / ${fmtMins(goals.z45Mins)}`);
-  console.log(`  ${RD}${z45Name}${R}  ${z45Bar}  ${"".padStart(18)}  = ${bold(fmtMins(z45Total))}${z45Tgt}`);
+  // Combined Z4+Z5 row
+  const z45Label = `${RD}${"Z4+Z5  hard".padEnd(15)}${R}`;
+  const z45ActStr = gray("—".padStart(7));
+  const z45DayStr = gray("—".padStart(9));
+  const z45TotStr = bold(`= ${fmtMins(z45Total)}`.padStart(10));
+  console.log(`  ${z45Label}  ${z45ActStr}  ${z45DayStr}  ${z45TotStr}  ${zoneBar(z45Total, goals.z45Mins, RD)}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
